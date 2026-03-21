@@ -22,7 +22,7 @@ domains:
 
 skills:
   - name: 'set up devtree'
-    slug: 'set-up-devtree'
+    slug: 'devtree-set-up-devtree'
     domain: 'configuring-isolated-worktrees'
     description: 'Install and configure devtree so a repo can run safely in multiple worktrees without local collisions.'
     type: 'core'
@@ -152,7 +152,7 @@ skills:
         skill: ''
 
   - name: 'run and operate devtree'
-    slug: 'run-and-operate-devtree'
+    slug: 'devtree-run-and-operate-devtree'
     domain: 'operating-isolated-development-runtime'
     description: 'Run the worktree-scoped dev environment, verify it is healthy, inspect the current instance, and clean up orphaned resources.'
     type: 'core'
@@ -191,7 +191,7 @@ skills:
         priority: 'CRITICAL'
         status: 'active'
         version_context: 'Current behavior in v0.1.0; development command wraps Vite with portless and optionally varlock.'
-        skills: ['run-and-operate-devtree', 'set-up-devtree']
+        skills: ['devtree-run-and-operate-devtree', 'devtree-set-up-devtree']
       - mistake: 'Disable portless and expect APP_URL to exist'
         mechanism: 'When PORTLESS=0 or portless is disabled, devtree does not inject a public URL, so auth flows that rely on a stable public callback URL need an explicit fallback such as BETTER_AUTH_URL.'
         wrong_pattern: |
@@ -234,20 +234,20 @@ skills:
 
 tensions:
   - name: 'simple setup versus explicit override freedom'
-    skills: ['set-up-devtree', 'run-and-operate-devtree']
+    skills: ['devtree-set-up-devtree', 'devtree-run-and-operate-devtree']
     description: 'Devtree works best when it owns the generated URL/env/dependency wiring, but advanced users can override those knobs in ways that quietly remove isolation.'
     implication: 'An agent that optimizes for user familiarity may hard-code names, ports, or URLs instead of preserving devtree-managed defaults.'
   - name: 'portless compatibility versus public URL correctness'
-    skills: ['set-up-devtree', 'run-and-operate-devtree']
+    skills: ['devtree-set-up-devtree', 'devtree-run-and-operate-devtree']
     description: 'Disabling portless can simplify local setup in constrained environments, but it also removes the stable public URL contract that other local tooling may depend on.'
     implication: 'An agent that disables portless without compensating config leaves auth and callback-driven flows subtly broken.'
 
 cross_references:
-  - from: 'set-up-devtree'
-    to: 'run-and-operate-devtree'
+  - from: 'devtree-set-up-devtree'
+    to: 'devtree-run-and-operate-devtree'
     reason: 'Setup decisions determine what runtime checks matter, especially around URLs, env injection, dependencies, and garbage collection.'
-  - from: 'run-and-operate-devtree'
-    to: 'set-up-devtree'
+  - from: 'devtree-run-and-operate-devtree'
+    to: 'devtree-set-up-devtree'
     reason: 'Most runtime failures come from configuration choices in devtree.config.ts rather than from the CLI commands themselves.'
 
 gaps: []

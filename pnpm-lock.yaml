@@ -21,12 +21,15 @@ importers:
         specifier: '*'
         version: 0.6.1
     devDependencies:
+      '@tanstack/intent':
+        specifier: ^0.0.23
+        version: 0.0.23
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
       vite-plus:
         specifier: latest
-        version: 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0))
+        version: 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2))(yaml@2.8.2)
 
 packages:
 
@@ -583,6 +586,10 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
+  '@tanstack/intent@0.0.23':
+    resolution: {integrity: sha512-q5e0sh5e+xBOR5Z7eoZTBcXtakgTwucm2m0bNUkj7h4UagSgIDmPRYbtC7B81AF4FB5rW2OP1zgl7Jd9EH4qEw==}
+    hasBin: true
+
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
 
@@ -725,6 +732,10 @@ packages:
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
+
+  cac@6.7.14:
+    resolution: {integrity: sha512-b6Ilus+c3RrdDk+JhLKUAQfzzgLEPy6wcXqS7f/xe1EETvsDP6GORG7SFuOs6cID5YkqchW/LXZbX5bc8j7ZcQ==}
+    engines: {node: '>=8'}
 
   cac@7.0.0:
     resolution: {integrity: sha512-tixWYgm5ZoOD+3g6UTea91eow5z6AAHaho3g0V9CNSNb45gM8SmflpAc+GRd1InC4AqN/07Unrgp56Y94N9hJQ==}
@@ -1027,6 +1038,11 @@ packages:
       utf-8-validate:
         optional: true
 
+  yaml@2.8.2:
+    resolution: {integrity: sha512-mplynKqc1C2hTVYxd0PU2xQAc22TI1vShAYGksCCfxbn/dFwnHTNi1bvYsBTkhdUNtGIf5xNOg938rrSSYvS9A==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@emnapi/core@1.9.1':
@@ -1319,6 +1335,11 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
+  '@tanstack/intent@0.0.23':
+    dependencies:
+      cac: 6.7.14
+      yaml: 2.8.2
+
   '@tybys/wasm-util@0.10.1':
     dependencies:
       tslib: 2.8.1
@@ -1336,7 +1357,7 @@ snapshots:
       varlock: 0.6.1
       vite: 8.0.1(esbuild@0.27.4)(tsx@4.21.0)
 
-  '@voidzero-dev/vite-plus-core@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)':
+  '@voidzero-dev/vite-plus-core@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)':
     dependencies:
       '@oxc-project/runtime': 0.120.0
       '@oxc-project/types': 0.120.0
@@ -1347,6 +1368,7 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.21.0
       typescript: 5.9.3
+      yaml: 2.8.2
 
   '@voidzero-dev/vite-plus-darwin-arm64@0.1.13':
     optional: true
@@ -1360,11 +1382,11 @@ snapshots:
   '@voidzero-dev/vite-plus-linux-x64-gnu@0.1.13':
     optional: true
 
-  '@voidzero-dev/vite-plus-test@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0))':
+  '@voidzero-dev/vite-plus-test@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2))(yaml@2.8.2)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@types/chai': 5.2.3
-      '@voidzero-dev/vite-plus-core': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)
+      '@voidzero-dev/vite-plus-core': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
       es-module-lexer: 1.7.0
       obug: 2.1.1
       pixelmatch: 7.1.0
@@ -1374,7 +1396,7 @@ snapshots:
       tinybench: 2.9.0
       tinyexec: 1.0.4
       tinyglobby: 0.2.15
-      vite: 8.0.1(esbuild@0.27.4)(tsx@4.21.0)
+      vite: 8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2)
       ws: 8.19.0
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
@@ -1404,6 +1426,8 @@ snapshots:
     optional: true
 
   assertion-error@2.0.1: {}
+
+  cac@6.7.14: {}
 
   cac@7.0.0: {}
 
@@ -1656,11 +1680,11 @@ snapshots:
 
   varlock@0.6.1: {}
 
-  vite-plus@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)):
+  vite-plus@0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2))(yaml@2.8.2):
     dependencies:
       '@oxc-project/types': 0.120.0
-      '@voidzero-dev/vite-plus-core': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)
-      '@voidzero-dev/vite-plus-test': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0))
+      '@voidzero-dev/vite-plus-core': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      '@voidzero-dev/vite-plus-test': 0.1.13(esbuild@0.27.4)(tsx@4.21.0)(typescript@5.9.3)(vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2))(yaml@2.8.2)
       cac: 7.0.0
       cross-spawn: 7.0.6
       oxfmt: 0.41.0
@@ -1714,8 +1738,23 @@ snapshots:
       fsevents: 2.3.3
       tsx: 4.21.0
 
+  vite@8.0.1(esbuild@0.27.4)(tsx@4.21.0)(yaml@2.8.2):
+    dependencies:
+      lightningcss: 1.32.0
+      picomatch: 4.0.3
+      postcss: 8.5.8
+      rolldown: 1.0.0-rc.10
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      esbuild: 0.27.4
+      fsevents: 2.3.3
+      tsx: 4.21.0
+      yaml: 2.8.2
+
   which@2.0.2:
     dependencies:
       isexe: 2.0.0
 
   ws@8.19.0: {}
+
+  yaml@2.8.2: {}

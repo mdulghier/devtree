@@ -1,5 +1,5 @@
 ---
-name: devtree/run-and-operate-devtree
+name: devtree-run-and-operate-devtree
 description: >
   Run and troubleshoot daily devtree workflows: `doctor`, `setup`, `dev`,
   `info`, `env write`, `env show`, `deps start|stop|logs`, and `gc`. Load
@@ -174,6 +174,6 @@ Source: `src/gc.ts:356`
 
 Disabling portless can simplify local bootstrapping in odd environments, but it removes the stable public URL contract that devtree normally provides. Agents that take the shortcut need to replace that URL explicitly.
 
-See also: `devtree/set-up-devtree` - setup choices around portless and env injection decide whether runtime URLs work.
+See also: `devtree-set-up-devtree` - setup choices around portless and env injection decide whether runtime URLs work.
 
-See also: `devtree/set-up-devtree` - configuration drives most runtime failures.
+See also: `devtree-set-up-devtree` - configuration drives most runtime failures.

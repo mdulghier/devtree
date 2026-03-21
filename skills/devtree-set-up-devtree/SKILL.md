@@ -1,5 +1,5 @@
 ---
-name: devtree/set-up-devtree
+name: devtree-set-up-devtree
 description: >
   Set up devtree in a Vite+ repository: install `devtree`, create
   `devtree.config.ts`, define `env.entries`, choose `dotenv` or `varlock`,
@@ -352,4 +352,4 @@ Source: `src/cli.ts:338`, `src/vite.ts:45`
 
 Devtree works best when it owns URL, env, and dependency naming. Agents trying to be “helpful” by hard-coding familiar local values usually delete the whole point of the library.
 
-See also: `devtree/run-and-operate-devtree` - runtime checks expose the fallout from setup shortcuts.
+See also: `devtree-run-and-operate-devtree` - runtime checks expose the fallout from setup shortcuts.

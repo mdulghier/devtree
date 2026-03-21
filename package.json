@@ -8,7 +8,8 @@
     "varlock",
     "vite",
     "vite-plus",
-    "worktree"
+    "worktree",
+    "tanstack-intent"
   ],
   "license": "UNLICENSED",
   "bin": {
@@ -17,7 +18,9 @@
   "files": [
     "bin",
     "dist",
-    "README.md"
+    "README.md",
+    "skills",
+    "!skills/_artifacts"
   ],
   "type": "module",
   "sideEffects": false,
@@ -43,6 +46,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
+    "@tanstack/intent": "^0.0.23",
     "typescript": "^5.7.2",
     "vite-plus": "latest"
   },

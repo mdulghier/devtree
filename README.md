@@ -99,3 +99,5 @@ Other commands:
 - `devtree env write|show`
 
 Add `dependencies` and `hooks` in `devtree.config.ts` when you want Compose services, custom setup steps, migrations, or pre-dev commands.
+
+If you use an AI agent, run `npx @tanstack/intent@latest install`.

@@ -6,15 +6,15 @@ Devtree is a single-package TypeScript library and CLI for running the same Vite
 
 | Domain | Description | Skills |
 | ------ | ----------- | ------ |
-| configuring isolated worktrees | Setting up repo-level configuration so each worktree gets isolated URLs, env values, and dependency names. | set-up-devtree |
-| operating isolated development runtime | Running, checking, inspecting, and cleaning up a worktree-scoped dev environment once configuration exists. | run-and-operate-devtree |
+| configuring isolated worktrees | Setting up repo-level configuration so each worktree gets isolated URLs, env values, and dependency names. | devtree-set-up-devtree |
+| operating isolated development runtime | Running, checking, inspecting, and cleaning up a worktree-scoped dev environment once configuration exists. | devtree-run-and-operate-devtree |
 
 ## Skill Inventory
 
 | Skill | Type | Domain | What it covers | Failure modes |
 | ----- | ---- | ------ | -------------- | ------------- |
-| set-up-devtree | core | configuring isolated worktrees | `define_devtree_config`, `devtree.config.ts`, env entries, dependencies, hooks, Vite integration, `doctor --fix`, `setup` | 4 |
-| run-and-operate-devtree | core | operating isolated development runtime | `dev`, `info`, `env write`, `env show`, `deps start|stop|logs`, `gc`, `doctor` | 4 |
+| devtree-set-up-devtree | core | configuring isolated worktrees | `define_devtree_config`, `devtree.config.ts`, env entries, dependencies, hooks, Vite integration, `doctor --fix`, `setup` | 4 |
+| devtree-run-and-operate-devtree | core | operating isolated development runtime | `dev`, `info`, `env write`, `env show`, `deps start|stop|logs`, `gc`, `doctor` | 4 |
 
 ## Failure Mode Inventory
 
@@ -31,7 +31,7 @@ Devtree is a single-package TypeScript library and CLI for running the same Vite
 
 | # | Mistake | Priority | Source | Cross-skill? |
 | --- | ------- | -------- | ------ | ------------ |
-| 1 | Start Vite directly instead of devtree | CRITICAL | `README.md`, `src/command-builder.ts` | `set-up-devtree` |
+| 1 | Start Vite directly instead of devtree | CRITICAL | `README.md`, `src/command-builder.ts` | `devtree-set-up-devtree` |
 | 2 | Disable portless and expect APP_URL to exist | HIGH | `src/cli.ts:499` | - |
 | 3 | Skip setup when dependencies or hooks matter | HIGH | `README.md`, `src/cli.ts:448` | - |
 | 4 | Assume gc removes unknown docker projects | MEDIUM | `src/gc.ts:356` | - |
@@ -40,26 +40,26 @@ Devtree is a single-package TypeScript library and CLI for running the same Vite
 
 | Tension | Skills | Agent implication |
 | ------- | ------ | ----------------- |
-| simple setup versus explicit override freedom | `set-up-devtree` ↔ `run-and-operate-devtree` | Agents may hard-code URLs, ports, or names instead of preserving devtree-managed isolation. |
-| portless compatibility versus public URL correctness | `set-up-devtree` ↔ `run-and-operate-devtree` | Agents may disable portless for convenience and forget the explicit callback URL fallback. |
+| simple setup versus explicit override freedom | `devtree-set-up-devtree` ↔ `devtree-run-and-operate-devtree` | Agents may hard-code URLs, ports, or names instead of preserving devtree-managed isolation. |
+| portless compatibility versus public URL correctness | `devtree-set-up-devtree` ↔ `devtree-run-and-operate-devtree` | Agents may disable portless for convenience and forget the explicit callback URL fallback. |
 
 ## Cross-References
 
 | From | To | Reason |
 | ---- | -- | ------ |
-| `set-up-devtree` | `run-and-operate-devtree` | Setup choices control what runtime diagnostics and cleanup patterns are needed later. |
-| `run-and-operate-devtree` | `set-up-devtree` | Runtime failures usually trace back to `devtree.config.ts` decisions. |
+| `devtree-set-up-devtree` | `devtree-run-and-operate-devtree` | Setup choices control what runtime diagnostics and cleanup patterns are needed later. |
+| `devtree-run-and-operate-devtree` | `devtree-set-up-devtree` | Runtime failures usually trace back to `devtree.config.ts` decisions. |
 
 ## Subsystems & Reference Candidates
 
 | Skill | Subsystems | Reference candidates |
 | ----- | ---------- | -------------------- |
-| `set-up-devtree` | - | - |
-| `run-and-operate-devtree` | - | - |
+| `devtree-set-up-devtree` | - | - |
+| `devtree-run-and-operate-devtree` | - | - |
 
 ## Recommended Skill File Structure
 
-- **Core skills:** `set-up-devtree`, `run-and-operate-devtree`
+- **Core skills:** `devtree-set-up-devtree`, `devtree-run-and-operate-devtree`
 - **Framework skills:** none
 - **Lifecycle skills:** none
 - **Composition skills:** none; companion tools should be handled through devtree setup rather than separate integration skills
