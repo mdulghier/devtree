@@ -1,0 +1,39 @@
+# skills/_artifacts/skill_tree.yaml
+library:
+  name: 'devtree'
+  version: '0.1.0'
+  repository: 'https://github.com/mdulghier/devtree'
+  description: 'Worktree-aware local development orchestration for Vite+ apps.'
+generated_from:
+  domain_map: 'skills/_artifacts/domain_map.yaml'
+  skill_spec: 'skills/_artifacts/skill_spec.md'
+generated_at: '2026-03-21'
+
+skills:
+  - name: 'set up devtree'
+    slug: 'set-up-devtree'
+    type: 'core'
+    domain: 'configuring-isolated-worktrees'
+    path: 'skills/set-up-devtree/SKILL.md'
+    description: 'Set up devtree in a Vite+ repo: create devtree.config.ts, configure env entries, register devtree_vite_plugins, and wire optional dependencies, hooks, and varlock support.'
+    sources:
+      - 'mdulghier/devtree:README.md'
+      - 'mdulghier/devtree:src/config.ts'
+      - 'mdulghier/devtree:src/cli.ts'
+      - 'mdulghier/devtree:src/vite.ts'
+      - 'mdulghier/devtree:src/env-file.ts'
+      - 'mdulghier/devtree:src/instance.ts'
+  - name: 'run and operate devtree'
+    slug: 'run-and-operate-devtree'
+    type: 'core'
+    domain: 'operating-isolated-development-runtime'
+    path: 'skills/run-and-operate-devtree/SKILL.md'
+    description: 'Run and troubleshoot day-to-day devtree workflows: use doctor, setup, dev, info, deps, env, and gc to verify the app is healthy and reachable at the worktree URL.'
+    sources:
+      - 'mdulghier/devtree:README.md'
+      - 'mdulghier/devtree:src/cli.ts'
+      - 'mdulghier/devtree:src/command-builder.ts'
+      - 'mdulghier/devtree:src/gc.ts'
+      - 'mdulghier/devtree:src/registry.ts'
+      - 'mdulghier/devtree:src/process.ts'
+      - 'mdulghier/devtree:src/instance.ts'

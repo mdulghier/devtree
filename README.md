@@ -1,25 +1,31 @@
 # Devtree
 
-Devtree is a worktree-aware multi-instance development toolkit for Vite+ apps.
+Run the same Vite+ app in multiple git worktrees without local-dev collisions.
 
-It handles the annoying local-dev glue that usually gets copy-pasted badly across repos:
+Devtree gives each worktree its own public URL, managed env block, scoped dependency names, setup hooks, and garbage collection for orphaned local resources.
 
-- stable `portless` URLs per worktree
-- managed local env overrides per instance
-- dependency lifecycle orchestration
-- migration and setup hooks
-- garbage collection for deleted worktrees
-- optional `varlock` integration from day one
+## Use
 
-## Package Surface
+### 1. Install
 
-- `devtree` CLI
-- `devtree/vite` Vite plugin helper
-- `devtree.config.ts` typed repo config
+```bash
+pnpm add -D devtree vite-plus
+```
 
-## Quick Start
+`portless` must be on `PATH` unless you disable it with `portless.enabled: false` or `PORTLESS=0`.
 
-Install the package and add a repo-level `devtree.config.ts`.
+If you use `varlock`, also install:
+
+```bash
+pnpm add -D varlock @varlock/vite-integration
+```
+
+### What These Tools Do
+
+- [`portless`](https://github.com/vercel-labs/portless) gives each local app a stable named URL instead of a random port. Devtree uses it to give every worktree its own predictable public URL and to run the dev server behind that URL.
+- [`varlock`](https://github.com/dmno-dev/varlock) is an env/schema tool for loading, validating, and injecting environment variables. Devtree uses it when `env.provider` is set to `"varlock"` so hooks and dev commands run with resolved, validated env values.
+
+### 2. Add `devtree.config.ts`
 
 ```ts
 import { define_devtree_config } from "devtree";
@@ -28,12 +34,25 @@ export default define_devtree_config({
   app_name: "my-app",
   env: {
     provider: "dotenv",
-    entries: () => [],
+    entries: ({ instance }) => [
+      {
+        kind: "value",
+        key: "APP_URL",
+        value: instance.public_url,
+      },
+      {
+        kind: "value",
+        key: "DATABASE_PORT",
+        value: String(instance.allocate_port("postgres", 5400)),
+      },
+    ],
   },
 });
 ```
 
-Register the Vite integration:
+By default Devtree manages a block inside `.env.local`. Set `env.file_path` if you want a different file.
+
+### 3. Register the Vite plugin
 
 ```ts
 import { defineConfig } from "vite-plus";
@@ -46,7 +65,7 @@ export default defineConfig({
 });
 ```
 
-Add a repo script:
+### 4. Add a script
 
 ```json
 {
@@ -56,61 +75,27 @@ Add a repo script:
 }
 ```
 
-Then use the CLI:
+### 5. Run it
+
+Run these from the repo root, or any subdirectory inside a repo that has `devtree.config.ts`.
 
 ```bash
-vp run devtree doctor --fix
-vp run devtree setup
-vp run devtree dev
-vp run devtree gc -- --dry-run
+pnpm devtree doctor --fix
+pnpm devtree setup
+pnpm devtree dev
+pnpm devtree info
+pnpm devtree gc --dry-run
 ```
 
-## Package Development
+- `doctor --fix` checks prerequisites and bootstraps `portless`
+- `setup` writes env overrides, starts dependencies, and runs hooks
+- `dev` starts the app through Devtree
+- `info` prints the current instance URL and names
+- `gc` removes orphaned dependency resources from deleted worktrees
 
-From `packages/devtree/`:
+Other commands:
 
-```bash
-vp install
-vp run build
-vp run check
-vp run test
-```
-
-## Commands
-
-- `devtree doctor [--fix]`
-- `devtree info`
-- `devtree setup`
-- `devtree dev [-- <vite args>]`
 - `devtree deps start|stop|logs`
-- `devtree gc [--dry-run] [--verbose]`
 - `devtree env write|show`
 
-## Config Overview
-
-`devtree.config.ts` owns:
-
-- app identity and namespace
-- `portless` policy
-- env provider: `dotenv` or `varlock`
-- managed env entries
-- dependency adapters
-- lifecycle hooks
-- garbage collection labels and registry namespace
-
-## Varlock
-
-Set `env.provider` to `"varlock"` to enable schema-driven env validation.
-
-In varlock mode Devtree:
-
-- still writes managed instance values to the configured local env override file
-- runs hooks through `varlock run`
-- wraps `vp dev` as `varlock run -- portless run --force --name <app_name> vp dev ...`
-- expects `varlock` and `@varlock/vite-integration` to be installed in the consuming repo
-
-## Docker Garbage Collection
-
-Devtree records managed dependency projects and labels Docker resources so `devtree gc` can remove leftovers after a worktree is deleted.
-
-That means less archaeology in Docker Desktop. A rare local-dev miracle.
+Add `dependencies` and `hooks` in `devtree.config.ts` when you want Compose services, custom setup steps, migrations, or pre-dev commands.
