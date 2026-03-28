@@ -1,6 +1,6 @@
 {
   "name": "devtree",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Worktree-aware multi-instance dev orchestration for Vite+ apps.",
   "keywords": [
     "devtree",
@@ -46,6 +46,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "vp test run src/*.test.ts"
   },
@@ -54,6 +56,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
+    "@types/node": "^24.5.2",
     "@tanstack/intent": "^0.0.23",
     "typescript": "^5.7.2",
     "vite-plus": "latest"
