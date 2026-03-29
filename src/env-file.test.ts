@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -46,6 +46,94 @@ describe("ensure_env_file", () => {
 
     expect(result.managed_env_values.DATABASE_URL).toBe("postgres://example");
     expect(result.effective_env_values.DATABASE_URL).toBe("postgres://example");
+
+    rmSync(repo_root, { force: true, recursive: true });
+  });
+
+  test("removes stale preamble fragments outside the managed block", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-env-test-"));
+    const loaded_config = create_loaded_config(repo_root);
+    const env_file_path = `${repo_root}/.env.test-managed`;
+
+    writeFileSync(
+      env_file_path,
+      [
+        "# test preamble",
+        "# >>> test managed env >>>",
+        "DATABASE_URL=postgres://stale",
+        "# CUSTOM=",
+        "# <<< test managed env <<<",
+        "",
+        "# test preamble",
+        "# Local note that should stay",
+        "",
+        "# test preamble",
+        "",
+        "APP_MODE=dev",
+      ].join("\n") + "\n",
+    );
+
+    const instance = create_devtree_instance(loaded_config);
+
+    ensure_env_file(loaded_config, {
+      ...instance,
+      env_file_path,
+    });
+
+    expect(readFileSync(env_file_path, "utf8")).toBe(
+      [
+        "# test preamble",
+        "# >>> test managed env >>>",
+        "DATABASE_URL=postgres://example",
+        "# CUSTOM=",
+        "# <<< test managed env <<<",
+        "",
+        "# Local note that should stay",
+        "",
+        "# test preamble",
+        "",
+        "APP_MODE=dev",
+      ].join("\n") + "\n",
+    );
+
+    rmSync(repo_root, { force: true, recursive: true });
+  });
+
+  test("replaces a malformed managed block without duplicating the file", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-env-test-"));
+    const loaded_config = create_loaded_config(repo_root);
+    const env_file_path = `${repo_root}/.env.test-managed`;
+
+    writeFileSync(
+      env_file_path,
+      [
+        "APP_MODE=dev",
+        "",
+        "# test preamble",
+        "# >>> test managed env >>>",
+        "DATABASE_URL=postgres://stale",
+        "# CUSTOM=",
+      ].join("\n") + "\n",
+    );
+
+    const instance = create_devtree_instance(loaded_config);
+
+    ensure_env_file(loaded_config, {
+      ...instance,
+      env_file_path,
+    });
+
+    expect(readFileSync(env_file_path, "utf8")).toBe(
+      [
+        "# test preamble",
+        "# >>> test managed env >>>",
+        "DATABASE_URL=postgres://example",
+        "# CUSTOM=",
+        "# <<< test managed env <<<",
+        "",
+        "APP_MODE=dev",
+      ].join("\n") + "\n",
+    );
 
     rmSync(repo_root, { force: true, recursive: true });
   });

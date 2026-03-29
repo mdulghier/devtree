@@ -8,17 +8,39 @@ Devtree gives each worktree its own public URL, managed env block, scoped depend
 
 ### 1. Install
 
-```bash
-pnpm add -D devtree vite-plus
-```
+Devtree assumes your app already uses `vite-plus`. It is a required peer dependency, but this README does not install it for you.
 
-`portless` must be on `PATH` unless you disable it with `portless.enabled: false` or `PORTLESS=0`.
-
-If you use `varlock`, also install:
+Install Devtree itself:
 
 ```bash
-pnpm add -D varlock @varlock/vite-integration
+vp add -D devtree
 ```
+
+Dependencies you may also need:
+
+- `vite-plus` - required. Your app should already have it installed and be using it.
+- `portless` - required unless you disable it with `portless.enabled: false` or `PORTLESS=0`. The `portless` command must be available on `PATH`.
+- `varlock` and `@varlock/vite-integration` - required only when `env.provider` is set to `"varlock"`.
+
+Install `portless` in the repo so `vp devtree ...` can find it:
+
+```bash
+vp add -D portless
+```
+
+If you want `portless` available outside pnpm-managed scripts too, install it globally:
+
+```bash
+vp add -g portless
+```
+
+If you use `varlock`, install both pieces together:
+
+```bash
+vp add -D varlock @varlock/vite-integration
+```
+
+That gives you the `varlock` CLI plus the Vite integration Devtree expects.
 
 ### What These Tools Do
 

@@ -23,21 +23,78 @@ function get_block_markers(managed_block_id?: string) {
   };
 }
 
-function remove_managed_block(file_text: string, start_marker: string, end_marker: string) {
+function strip_leading_preamble_blocks(file_text: string, preamble_lines: string[]) {
+  const preamble_block = preamble_lines.join("\n").trim();
+  let next_text = file_text.trim();
+
+  if (!preamble_block) {
+    return next_text;
+  }
+
+  while (next_text === preamble_block || next_text.startsWith(`${preamble_block}\n`)) {
+    next_text = next_text.slice(preamble_block.length).trimStart();
+  }
+
+  return next_text;
+}
+
+function strip_trailing_preamble_blocks(file_text: string, preamble_lines: string[]) {
+  const preamble_block = preamble_lines.join("\n").trim();
+  let next_text = file_text.trim();
+
+  if (!preamble_block) {
+    return next_text;
+  }
+
+  while (next_text === preamble_block || next_text.endsWith(`\n${preamble_block}`)) {
+    next_text = next_text.slice(0, next_text.length - preamble_block.length).trimEnd();
+  }
+
+  return next_text;
+}
+
+function remove_managed_block(
+  file_text: string,
+  start_marker: string,
+  end_marker: string,
+  preamble_lines: string[],
+) {
   const start_index = file_text.indexOf(start_marker);
   const end_index = file_text.indexOf(end_marker);
 
-  if (start_index === -1 || end_index === -1 || end_index < start_index) {
+  if (start_index === -1 && end_index === -1) {
     return file_text.trim();
   }
 
-  const before_block = file_text.slice(0, start_index).trim();
-  const after_block = file_text.slice(end_index + end_marker.length).trim();
+  if (start_index === -1) {
+    return strip_leading_preamble_blocks(
+      file_text.slice(end_index + end_marker.length),
+      preamble_lines,
+    );
+  }
+
+  if (end_index === -1 || end_index < start_index) {
+    return strip_trailing_preamble_blocks(file_text.slice(0, start_index), preamble_lines);
+  }
+
+  const before_block = strip_trailing_preamble_blocks(
+    file_text.slice(0, start_index),
+    preamble_lines,
+  );
+  const after_block = strip_leading_preamble_blocks(
+    file_text.slice(end_index + end_marker.length),
+    preamble_lines,
+  );
 
   return [before_block, after_block].filter(Boolean).join("\n\n");
 }
 
-function read_existing_env_file(env_file_path: string, start_marker: string, end_marker: string) {
+function read_existing_env_file(
+  env_file_path: string,
+  start_marker: string,
+  end_marker: string,
+  preamble_lines: string[],
+) {
   if (!existsSync(env_file_path)) {
     return {
       file_text: "",
@@ -50,7 +107,7 @@ function read_existing_env_file(env_file_path: string, start_marker: string, end
 
   return {
     file_text,
-    custom_text: remove_managed_block(file_text, start_marker, end_marker),
+    custom_text: remove_managed_block(file_text, start_marker, end_marker, preamble_lines),
     env_values: parse(file_text),
   };
 }
@@ -80,7 +137,12 @@ export function ensure_env_file(
   instance: Devtree_instance,
 ): Ensure_env_file_result {
   const markers = get_block_markers(loaded_config.config.env.managed_block_id);
-  const existing_env = read_existing_env_file(instance.env_file_path, markers.start, markers.end);
+  const existing_env = read_existing_env_file(
+    instance.env_file_path,
+    markers.start,
+    markers.end,
+    loaded_config.config.env.preamble ?? [],
+  );
   const managed_entries = loaded_config.config.env.entries({
     config: loaded_config.config,
     instance,
