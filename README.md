@@ -20,6 +20,7 @@ Dependencies you may also need:
 
 - `vite-plus` - required. Your app should already have it installed and be using it.
 - `portless` - required unless you disable it with `portless.enabled: false` or `PORTLESS=0`. The `portless` command must be available on `PATH`.
+- `tailscale` - optional, only needed when `tailscale.enabled` is `true`.
 - `varlock` and `@varlock/vite-integration` - required only when `env.provider` is set to `"varlock"`.
 
 Install `portless` in the repo so `vp devtree ...` can find it:
@@ -54,6 +55,9 @@ import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
   app_name: "my-app",
+  tailscale: {
+    enabled: true,
+  },
   env: {
     provider: "dotenv",
     entries: ({ instance }) => [
@@ -73,6 +77,8 @@ export default define_devtree_config({
 ```
 
 By default Devtree manages a block inside `.env.local`. Set `env.file_path` if you want a different file.
+
+If you enable `tailscale`, Devtree checks for the `tailscale` CLI, reads the machine's MagicDNS hostname, starts Vite on `0.0.0.0`, and adds that hostname to Vite's allowed hosts so the dev server can be reached over Tailscale.
 
 ### 3. Register the Vite plugin
 
@@ -109,8 +115,8 @@ pnpm devtree info
 pnpm devtree gc --dry-run
 ```
 
-- `doctor --fix` checks prerequisites and bootstraps `portless`
-- `setup` writes env overrides, starts dependencies, and runs hooks
+- `doctor --fix` checks prerequisites, bootstraps `portless`, and validates Tailscale when `tailscale.enabled` is on
+- `setup` writes env overrides, starts dependencies, runs hooks, and reports the detected Tailscale host
 - `dev` starts the app through Devtree
 - `info` prints the current instance URL and names
 - `gc` removes orphaned dependency resources from deleted worktrees
@@ -121,5 +127,12 @@ Other commands:
 - `devtree env write|show`
 
 Add `dependencies` and `hooks` in `devtree.config.ts` when you want Compose services, custom setup steps, migrations, or pre-dev commands.
+
+### Tailscale Notes
+
+- Turn it on with `tailscale: { enabled: true }` in `devtree.config.ts`.
+- Install the `tailscale` CLI and make sure you're logged in on the machine running `devtree dev`.
+- `devtree doctor` fails when Tailscale is enabled but the CLI or MagicDNS hostname is unavailable.
+- `devtree setup`, `devtree dev`, and `devtree info` surface the detected Tailscale host so you can verify the integration quickly.
 
 If you use an AI agent, run `npx @tanstack/intent@latest install`.

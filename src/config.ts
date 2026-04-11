@@ -56,6 +56,9 @@ export type Devtree_dependency = Compose_dependency | Command_dependency;
 export type Devtree_config = {
   app_name: string;
   namespace?: string;
+  tailscale?: {
+    enabled?: boolean;
+  };
   portless?: {
     enabled?: boolean;
     https?: boolean | "inherit";

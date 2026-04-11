@@ -38,4 +38,16 @@ describe("build_development_command", () => {
 
     expect(command_parts[0]).toBe("varlock");
   });
+
+  test("listens on all interfaces when a custom vite host is provided", () => {
+    expect(
+      build_development_command({
+        app_name: "target-ascent",
+        extra_args: [],
+        portless_enabled: false,
+        vite_host: "0.0.0.0",
+        use_varlock: false,
+      }),
+    ).toEqual(["vp", "dev", "--host", "0.0.0.0", "--clearScreen", "false"]);
+  });
 });

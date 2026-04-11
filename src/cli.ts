@@ -20,6 +20,7 @@ import {
   type Run_command_options,
 } from "./process.ts";
 import { register_compose_project } from "./registry.ts";
+import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
 
 type Command_name = "deps" | "dev" | "doctor" | "env" | "gc" | "help" | "info" | "setup";
 
@@ -29,13 +30,14 @@ type Runtime_state = {
   env_status_message: string;
   managed_env_values: Record<string, string>;
   effective_env_values: Record<string, string>;
+  tailscale: Resolved_tailscale;
 };
 
 function print_help() {
   console.log("Usage: devtree <command>");
   console.log("");
   console.log("Commands:");
-  console.log("  doctor [--fix]          Check local prerequisites and bootstrap portless");
+  console.log("  doctor [--fix]          Check local prerequisites, portless, and tailscale");
   console.log("  info                    Print the current instance URLs and resource names");
   console.log("  setup                   Write env overrides, start dependencies, run hooks");
   console.log("  dev [-- <vite args>]    Start the app through devtree and portless");
@@ -65,6 +67,7 @@ function get_portless_start_args(loaded_config: Loaded_devtree_config) {
 function create_runtime_env(
   instance: Devtree_instance,
   effective_env_values: Record<string, string>,
+  tailscale: Resolved_tailscale,
   env_overrides?: Record<string, string | undefined>,
 ) {
   return {
@@ -75,6 +78,8 @@ function create_runtime_env(
     DEVTREE_INSTANCE_ID: instance.instance_id,
     DEVTREE_NAMESPACE: instance.registry_namespace,
     DEVTREE_PUBLIC_URL: instance.public_url,
+    DEVTREE_TAILSCALE_ENABLED: tailscale.enabled ? "1" : "0",
+    DEVTREE_TAILSCALE_HOST: tailscale.host ?? undefined,
     DEVTREE_WORKTREE_PATH: instance.worktree_path,
     DEVTREE_LABEL_PREFIX: instance.label_prefix,
   };
@@ -116,17 +121,19 @@ function run_process(
   return run_command_inherit(command, args, {
     cwd: options?.cwd,
     allow_failure: options?.allow_failure,
-    env: create_runtime_env(
-      runtime_state.instance,
-      runtime_state.effective_env_values,
-      options?.env,
-    ),
-  });
+      env: create_runtime_env(
+        runtime_state.instance,
+        runtime_state.effective_env_values,
+        runtime_state.tailscale,
+        options?.env,
+      ),
+    });
 }
 
 function get_runtime_state(loaded_config: Loaded_devtree_config) {
   const instance = create_devtree_instance(loaded_config);
   const env_result = ensure_env_file(loaded_config, instance);
+  const tailscale = resolve_tailscale(loaded_config.config);
 
   return {
     loaded_config,
@@ -134,7 +141,23 @@ function get_runtime_state(loaded_config: Loaded_devtree_config) {
     env_status_message: get_env_file_status_message(env_result),
     managed_env_values: env_result.managed_env_values,
     effective_env_values: env_result.effective_env_values,
+    tailscale,
   };
+}
+
+function print_tailscale_status(tailscale: Resolved_tailscale) {
+  if (!tailscale.enabled) {
+    return;
+  }
+
+  if (tailscale.host) {
+    console.log(`[devtree] Tailscale host ${tailscale.host}`);
+    return;
+  }
+
+  console.warn(
+    `[devtree] ${tailscale.error ?? "Tailscale is enabled, but no host was detected"}. Vite will stay localhost-only.`,
+  );
 }
 
 function get_command_context(runtime_state: Runtime_state): Command_spec_context {
@@ -303,6 +326,7 @@ function resolve_require_from_root(repo_root: string) {
 function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   const issues: string[] = [];
   const compose_dependencies = get_compose_dependencies(loaded_config);
+  const tailscale = resolve_tailscale(loaded_config.config);
 
   console.log(`[pass] config ${loaded_config.config_path}`);
 
@@ -323,6 +347,14 @@ function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
     } catch (error) {
       issues.push(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  if (!tailscale.enabled) {
+    console.log("[skip] tailscale disabled");
+  } else if (tailscale.host) {
+    console.log(`[pass] tailscale host ${tailscale.host}`);
+  } else {
+    issues.push(tailscale.error ?? "tailscale is enabled, but no host was detected");
   }
 
   if (compose_dependencies.length > 0) {
@@ -387,6 +419,10 @@ function print_info(runtime_state: Runtime_state) {
   console.log(`Env provider: ${runtime_state.loaded_config.config.env.provider}`);
   console.log(`Env file: ${runtime_state.instance.env_file_path}`);
 
+  if (runtime_state.tailscale.enabled) {
+    console.log(`Tailscale host: ${runtime_state.tailscale.host ?? "unavailable"}`);
+  }
+
   for (const dependency of get_compose_dependencies(runtime_state.loaded_config)) {
     const compose_project = resolve_compose_project_name(
       dependency,
@@ -447,6 +483,7 @@ async function main() {
 
   if (command_name === "setup") {
     ensure_portless_ready(loaded_config);
+    print_tailscale_status(runtime_state.tailscale);
 
     for (const dependency of loaded_config.config.dependencies ?? []) {
       if (dependency.kind === "compose") {
@@ -461,6 +498,9 @@ async function main() {
     run_hook(runtime_state, "post_setup");
 
     console.log(`Open ${runtime_state.instance.public_url} after starting the app.`);
+    if (runtime_state.tailscale.host) {
+      console.log(`Tailscale hostname available to Vite: ${runtime_state.tailscale.host}`);
+    }
     console.log("Run `vp run devtree dev` to launch the worktree-scoped dev server.");
     return;
   }
@@ -503,18 +543,24 @@ async function main() {
     }
 
     ensure_portless_ready(loaded_config);
+    print_tailscale_status(runtime_state.tailscale);
     run_hook(runtime_state, "pre_dev");
 
     const development_command = build_development_command({
       app_name: runtime_state.instance.app_name,
       extra_args,
       portless_enabled: runtime_state.instance.portless_enabled,
+      vite_host: runtime_state.tailscale.host ? "0.0.0.0" : undefined,
       use_varlock: loaded_config.config.env.provider === "varlock",
     });
     const [command, ...args] = development_command;
 
     run_command_inherit(command, args, {
-      env: create_runtime_env(runtime_state.instance, runtime_state.effective_env_values),
+      env: create_runtime_env(
+        runtime_state.instance,
+        runtime_state.effective_env_values,
+        runtime_state.tailscale,
+      ),
     });
     return;
   }

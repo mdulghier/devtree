@@ -8,12 +8,25 @@ function create_core_devtree_plugin(): Plugin {
     apply: "serve",
     config(user_config) {
       const next_config: UserConfig = {};
+      const tailscale_host = process.env.DEVTREE_TAILSCALE_HOST?.trim();
 
       if (!user_config.server?.host) {
         next_config.server = {
           ...user_config.server,
           host: "127.0.0.1",
         };
+      }
+
+      if (tailscale_host && user_config.server?.allowedHosts !== true) {
+        const allowed_hosts = user_config.server?.allowedHosts ?? [];
+
+        if (!allowed_hosts.includes(tailscale_host)) {
+          next_config.server = {
+            ...next_config.server,
+            ...user_config.server,
+            allowedHosts: [...allowed_hosts, tailscale_host],
+          };
+        }
       }
 
       if (user_config.clearScreen === undefined) {
