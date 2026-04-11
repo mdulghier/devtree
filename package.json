@@ -1,6 +1,6 @@
 {
   "name": "@mdulghier/devtree",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Worktree-aware multi-instance dev orchestration for Vite+ apps.",
   "keywords": [
     "devtree",
@@ -19,7 +19,7 @@
   "bugs": {
     "url": "https://github.com/mdulghier/devtree/issues"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "bin": {
     "devtree": "./bin/devtree.mjs"
   },
