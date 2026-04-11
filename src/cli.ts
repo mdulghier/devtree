@@ -9,6 +9,7 @@ import type {
   Loaded_devtree_config,
 } from "./config.ts";
 import { load_devtree_config } from "./config.ts";
+import { format_config_value, get_config_value, set_config_value } from "./config-command.ts";
 import { build_development_command } from "./command-builder.ts";
 import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
 import { run_gc } from "./gc.ts";
@@ -22,7 +23,16 @@ import {
 import { register_compose_project } from "./registry.ts";
 import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
 
-type Command_name = "deps" | "dev" | "doctor" | "env" | "gc" | "help" | "info" | "setup";
+type Command_name =
+  | "config"
+  | "deps"
+  | "dev"
+  | "doctor"
+  | "env"
+  | "gc"
+  | "help"
+  | "info"
+  | "setup";
 
 type Runtime_state = {
   loaded_config: Loaded_devtree_config;
@@ -38,6 +48,7 @@ function print_help() {
   console.log("");
   console.log("Commands:");
   console.log("  doctor [--fix]          Check local prerequisites, portless, and tailscale");
+  console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
   console.log("  info                    Print the current instance URLs and resource names");
   console.log("  setup                   Write env overrides, start dependencies, run hooks");
   console.log("  dev [-- <vite args>]    Start the app through devtree and portless");
@@ -435,15 +446,37 @@ function print_info(runtime_state: Runtime_state) {
 async function main() {
   const argv = process.argv.slice(2);
   const command_name = get_command_name(argv);
-  const loaded_config = await load_devtree_config();
 
   if (command_name === "help") {
     print_help();
     return;
   }
 
+  const loaded_config = await load_devtree_config();
+
   if (command_name === "doctor") {
     run_doctor(loaded_config, argv.includes("--fix"));
+    return;
+  }
+
+  if (command_name === "config") {
+    const config_key = argv[1];
+
+    if (!config_key) {
+      throw new Error("Usage: devtree config <key.path> [value]");
+    }
+
+    if (argv.length === 2) {
+      console.log(format_config_value(get_config_value(loaded_config.config, config_key)));
+      return;
+    }
+
+    set_config_value(loaded_config.config_path, config_key, argv.slice(2).join(" "));
+
+    const updated_config = await load_devtree_config();
+    console.log(
+      `${config_key} = ${format_config_value(get_config_value(updated_config.config, config_key))}`,
+    );
     return;
   }
 

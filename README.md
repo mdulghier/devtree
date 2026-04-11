@@ -124,7 +124,21 @@ pnpm devtree gc --dry-run
 Other commands:
 
 - `devtree deps start|stop|logs`
+- `devtree config tailscale.enabled true`
 - `devtree env write|show`
+
+`devtree config <key.path>` prints the current value from `devtree.config.ts`.
+
+`devtree config <key.path> <value>` writes the new value back into `devtree.config.ts`.
+
+Examples:
+
+```bash
+pnpm devtree config tailscale.enabled true
+pnpm devtree config portless.https "inherit"
+pnpm devtree config namespace personal-dev
+pnpm devtree config tailscale.enabled
+```
 
 Add `dependencies` and `hooks` in `devtree.config.ts` when you want Compose services, custom setup steps, migrations, or pre-dev commands.
 
