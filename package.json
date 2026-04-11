@@ -48,6 +48,7 @@
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "prepack": "npm run build",
+    "ci": "npm run check && npm test && npm run build",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "vp test run src/*.test.ts"
   },
