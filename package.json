@@ -1,6 +1,6 @@
 {
-  "name": "devtree",
-  "version": "0.1.4",
+  "name": "@mdulghier/devtree",
+  "version": "0.1.5",
   "description": "Worktree-aware multi-instance dev orchestration for Vite+ apps.",
   "keywords": [
     "devtree",
