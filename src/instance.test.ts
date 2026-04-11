@@ -6,8 +6,8 @@ import type { Loaded_devtree_config } from "./config.ts";
 function create_loaded_config(repo_root: string): Loaded_devtree_config {
   return {
     config: {
-      app_name: "target-ascent",
-      namespace: "target-ascent",
+      app_name: "demo-app",
+      namespace: "demo-app",
       env: {
         provider: "dotenv",
         entries: () => [],

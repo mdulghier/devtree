@@ -6,7 +6,7 @@ describe("build_development_command", () => {
   test("wraps vite with portless by default", () => {
     expect(
       build_development_command({
-        app_name: "target-ascent",
+        app_name: "demo-app",
         extra_args: ["--", "--open"],
         portless_enabled: true,
         use_varlock: false,
@@ -16,7 +16,7 @@ describe("build_development_command", () => {
       "run",
       "--force",
       "--name",
-      "target-ascent",
+      "demo-app",
       "--",
       "vp",
       "dev",
@@ -30,7 +30,7 @@ describe("build_development_command", () => {
 
   test("wraps the full command with varlock when enabled", () => {
     const command_parts = build_development_command({
-      app_name: "target-ascent",
+      app_name: "demo-app",
       extra_args: [],
       portless_enabled: true,
       use_varlock: true,
@@ -42,7 +42,7 @@ describe("build_development_command", () => {
   test("listens on all interfaces when a custom vite host is provided", () => {
     expect(
       build_development_command({
-        app_name: "target-ascent",
+        app_name: "demo-app",
         extra_args: [],
         portless_enabled: false,
         vite_host: "0.0.0.0",

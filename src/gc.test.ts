@@ -14,7 +14,7 @@ describe("classify_projects", () => {
         {
           project_name: "active-project",
           worktree_path: active_worktree_path,
-          registry_namespace: "target-ascent",
+          registry_namespace: "demo-app",
           containers: [],
           networks: [],
           volumes: [],
@@ -23,7 +23,7 @@ describe("classify_projects", () => {
         {
           project_name: "orphan-project",
           worktree_path: "/tmp/orphan-project",
-          registry_namespace: "target-ascent",
+          registry_namespace: "demo-app",
           containers: [],
           networks: [],
           volumes: [],
@@ -32,7 +32,7 @@ describe("classify_projects", () => {
         {
           project_name: "unknown-project",
           worktree_path: null,
-          registry_namespace: "target-ascent",
+          registry_namespace: "demo-app",
           containers: [],
           networks: [],
           volumes: [],

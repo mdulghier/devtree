@@ -4,7 +4,7 @@ import { devtree_vite_plugins } from "./vite.ts";
 import type { Devtree_config } from "./config.ts";
 
 const base_config: Devtree_config = {
-  app_name: "target-ascent",
+  app_name: "demo-app",
   env: {
     provider: "dotenv",
     entries: () => [],
