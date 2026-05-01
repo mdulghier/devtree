@@ -35,6 +35,12 @@ describe("update_config_text", () => {
       'namespace: "personal dev"',
     );
   });
+
+  test("creates the dev server runner config", () => {
+    expect(update_config_text(config_file_text, "dev_server.runner", "vite")).toContain(
+      'dev_server: {\n        runner: "vite"\n    }',
+    );
+  });
 });
 
 describe("get_config_value", () => {
@@ -42,6 +48,9 @@ describe("get_config_value", () => {
     app_name: "demo-app",
     tailscale: {
       enabled: true,
+    },
+    dev_server: {
+      runner: "vite",
     },
     env: {
       provider: "dotenv",
@@ -55,6 +64,10 @@ describe("get_config_value", () => {
 
   test("returns undefined when a key is missing", () => {
     expect(get_config_value(config, "portless.enabled")).toBeUndefined();
+  });
+
+  test("reads the dev server runner", () => {
+    expect(get_config_value(config, "dev_server.runner")).toBe("vite");
   });
 });
 

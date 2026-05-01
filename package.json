@@ -1,7 +1,7 @@
 {
   "name": "@mdulghier/devtree",
   "version": "0.1.6",
-  "description": "Worktree-aware multi-instance dev orchestration for Vite+ apps.",
+  "description": "Worktree-aware multi-instance dev orchestration for Vite apps.",
   "keywords": [
     "devtree",
     "portless",
@@ -60,10 +60,12 @@
     "@types/node": "^24.5.2",
     "@tanstack/intent": "^0.0.23",
     "typescript": "^5.7.2",
+    "vite": "8.0.1",
     "vite-plus": "latest"
   },
   "peerDependencies": {
     "@varlock/vite-integration": "*",
+    "vite": "*",
     "varlock": "*",
     "vite-plus": "*"
   },
@@ -71,7 +73,13 @@
     "@varlock/vite-integration": {
       "optional": true
     },
+    "vite": {
+      "optional": true
+    },
     "varlock": {
+      "optional": true
+    },
+    "vite-plus": {
       "optional": true
     }
   },

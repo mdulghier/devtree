@@ -1,4 +1,4 @@
-import type { Plugin, UserConfig } from "vite-plus";
+import type { Plugin, UserConfig } from "vite";
 
 import type { Devtree_config } from "./config.ts";
 
@@ -50,7 +50,7 @@ function create_core_devtree_plugin(): Plugin {
         return;
       }
 
-      console.warn("[devtree] Run `vp run devtree dev` for isolated multi-instance development.");
+      console.warn("[devtree] Run `pnpm devtree dev` for isolated multi-instance development.");
     },
   };
 }
