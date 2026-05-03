@@ -1,7 +1,7 @@
 ---
 name: devtree-set-up-devtree
 description: >
-  Set up devtree in a Vite+ repository: install `devtree`, create
+  Set up devtree in a Vite repository: install `devtree`, create
   `devtree.config.ts`, define `env.entries`, choose `dotenv` or `varlock`,
   register `devtree_vite_plugins`, and configure optional `dependencies`
   and `hooks`. Load this when an agent needs to bootstrap worktree-aware
@@ -22,17 +22,22 @@ sources:
 
 ## Setup
 
-Install `devtree` and register both the config file and the Vite plugin.
+Install `devtree` and register both the config file and the Vite plugin. Devtree defaults to `vite-plus`; set `dev_server.runner` to `vite` for plain Vite apps.
 
 ```bash
 pnpm add -D devtree vite-plus
 ```
+
+For plain Vite apps, install `vite` instead and set `dev_server.runner` to `'vite'`.
 
 ```ts
 import { define_devtree_config } from 'devtree'
 
 export default define_devtree_config({
   app_name: 'my-app',
+  dev_server: {
+    runner: 'vite-plus',
+  },
   env: {
     provider: 'dotenv',
     entries: ({ instance }) => [
@@ -61,6 +66,8 @@ export default defineConfig({
   plugins: [...(await devtree_vite_plugins(devtree_config))],
 })
 ```
+
+Plain Vite apps can import `defineConfig` from `vite` instead.
 
 ```json
 {

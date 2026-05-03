@@ -10,7 +10,11 @@ import type {
 } from "./config.ts";
 import { load_devtree_config } from "./config.ts";
 import { format_config_value, get_config_value, set_config_value } from "./config-command.ts";
-import { build_development_command } from "./command-builder.ts";
+import {
+  build_development_command,
+  get_dev_server_command,
+  type Dev_server_runner,
+} from "./command-builder.ts";
 import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
 import { run_gc } from "./gc.ts";
 import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
@@ -320,7 +324,7 @@ function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix 
 
     if (list_result.status !== 0) {
       throw new Error(
-        "Portless is installed, but the proxy is not reachable. Run `vp run devtree doctor --fix`.",
+        "Portless is installed, but the proxy is not reachable. Run `pnpm devtree doctor --fix`.",
       );
     }
 
@@ -334,10 +338,22 @@ function resolve_require_from_root(repo_root: string) {
   return createRequire(resolve(repo_root, "package.json"));
 }
 
+function get_dev_server_runner(loaded_config: Loaded_devtree_config): Dev_server_runner {
+  const runner = loaded_config.config.dev_server?.runner as string | undefined;
+
+  if (runner === undefined || runner === "vite-plus" || runner === "vite") {
+    return runner ?? "vite-plus";
+  }
+
+  throw new Error('dev_server.runner must be "vite-plus" or "vite".');
+}
+
 function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   const issues: string[] = [];
   const compose_dependencies = get_compose_dependencies(loaded_config);
   const tailscale = resolve_tailscale(loaded_config.config);
+  const dev_server_runner = get_dev_server_runner(loaded_config);
+  const dev_server_command = get_dev_server_command(dev_server_runner);
 
   console.log(`[pass] config ${loaded_config.config_path}`);
 
@@ -345,6 +361,12 @@ function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
     console.log("[pass] git available");
   } else {
     issues.push("git is not available on PATH");
+  }
+
+  if (command_exists(dev_server_command)) {
+    console.log(`[pass] dev server runner ${dev_server_command} available`);
+  } else {
+    issues.push(`dev server runner ${dev_server_command} is not available on PATH`);
   }
 
   if (loaded_config.config.portless?.enabled === false || process.env.PORTLESS === "0") {
@@ -501,7 +523,7 @@ async function main() {
       return;
     }
 
-    throw new Error("Usage: vp run devtree env <write|show>");
+    throw new Error("Usage: devtree env <write|show>");
   }
 
   if (command_name === "gc") {
@@ -534,7 +556,7 @@ async function main() {
     if (runtime_state.tailscale.host) {
       console.log(`Tailscale hostname available to Vite: ${runtime_state.tailscale.host}`);
     }
-    console.log("Run `vp run devtree dev` to launch the worktree-scoped dev server.");
+    console.log("Run `pnpm devtree dev` to launch the worktree-scoped dev server.");
     return;
   }
 
@@ -542,7 +564,7 @@ async function main() {
     const deps_subcommand = argv[1];
 
     if (deps_subcommand !== "start" && deps_subcommand !== "stop" && deps_subcommand !== "logs") {
-      throw new Error("Usage: vp run devtree deps <start|stop|logs>");
+      throw new Error("Usage: devtree deps <start|stop|logs>");
     }
 
     for (const dependency of loaded_config.config.dependencies ?? []) {
@@ -583,6 +605,7 @@ async function main() {
       app_name: runtime_state.instance.app_name,
       extra_args,
       portless_enabled: runtime_state.instance.portless_enabled,
+      runner: get_dev_server_runner(loaded_config),
       vite_host: runtime_state.tailscale.host ? "0.0.0.0" : undefined,
       use_varlock: loaded_config.config.env.provider === "varlock",
     });

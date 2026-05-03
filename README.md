@@ -1,6 +1,6 @@
 # Devtree
 
-Run the same Vite+ app in multiple git worktrees without local-dev collisions.
+Run the same Vite app in multiple git worktrees without local-dev collisions.
 
 Devtree gives each worktree its own public URL, managed env block, scoped dependency names, setup hooks, and garbage collection for orphaned local resources.
 
@@ -8,37 +8,37 @@ Devtree gives each worktree its own public URL, managed env block, scoped depend
 
 ### 1. Install
 
-Devtree assumes your app already uses `vite-plus`. It is a required peer dependency, but this README does not install it for you.
+Devtree can launch either `vite-plus` or plain `vite`. It defaults to `vite-plus` for compatibility with existing projects.
 
 Install Devtree itself:
 
 ```bash
-vp add -D devtree
+pnpm add -D devtree
 ```
 
 Dependencies you may also need:
 
-- `vite-plus` - required. Your app should already have it installed and be using it.
+- `vite-plus` or `vite` - required. Devtree runs `vp dev` by default, or `vite dev` when `dev_server.runner` is `"vite"`.
 - `portless` - required unless you disable it with `portless.enabled: false` or `PORTLESS=0`. The `portless` command must be available on `PATH`.
 - `tailscale` - optional, only needed when `tailscale.enabled` is `true`.
 - `varlock` and `@varlock/vite-integration` - required only when `env.provider` is set to `"varlock"`.
 
-Install `portless` in the repo so `vp devtree ...` can find it:
+Install `portless` in the repo so `devtree` can find it:
 
 ```bash
-vp add -D portless
+pnpm add -D portless
 ```
 
 If you want `portless` available outside pnpm-managed scripts too, install it globally:
 
 ```bash
-vp add -g portless
+pnpm add -g portless
 ```
 
 If you use `varlock`, install both pieces together:
 
 ```bash
-vp add -D varlock @varlock/vite-integration
+pnpm add -D varlock @varlock/vite-integration
 ```
 
 That gives you the `varlock` CLI plus the Vite integration Devtree expects.
@@ -55,6 +55,9 @@ import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
   app_name: "my-app",
+  dev_server: {
+    runner: "vite-plus",
+  },
   tailscale: {
     enabled: true,
   },
@@ -78,12 +81,16 @@ export default define_devtree_config({
 
 By default Devtree manages a block inside `.env.local`. Set `env.file_path` if you want a different file.
 
+Set `dev_server.runner` to `"vite"` if the app uses plain Vite and should launch with `vite dev`.
+
 If you enable `tailscale`, Devtree checks for the `tailscale` CLI, reads the machine's MagicDNS hostname, starts Vite on `0.0.0.0`, and adds that hostname to Vite's allowed hosts so the dev server can be reached over Tailscale.
 
 ### 3. Register the Vite plugin
 
+Use your app's existing config helper. Plain Vite apps import from `vite`; VitePlus apps can keep importing from `vite-plus`.
+
 ```ts
-import { defineConfig } from "vite-plus";
+import { defineConfig } from "vite";
 import { devtree_vite_plugins } from "devtree/vite";
 
 import devtree_config from "./devtree.config.ts";
@@ -135,6 +142,7 @@ Examples:
 
 ```bash
 pnpm devtree config tailscale.enabled true
+pnpm devtree config dev_server.runner vite
 pnpm devtree config portless.https "inherit"
 pnpm devtree config namespace personal-dev
 pnpm devtree config tailscale.enabled

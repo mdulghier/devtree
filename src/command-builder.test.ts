@@ -3,7 +3,7 @@ import { describe, expect, test } from "vite-plus/test";
 import { build_development_command } from "./command-builder.ts";
 
 describe("build_development_command", () => {
-  test("wraps vite with portless by default", () => {
+  test("wraps vite-plus with portless by default", () => {
     expect(
       build_development_command({
         app_name: "demo-app",
@@ -49,5 +49,17 @@ describe("build_development_command", () => {
         use_varlock: false,
       }),
     ).toEqual(["vp", "dev", "--host", "0.0.0.0", "--clearScreen", "false"]);
+  });
+
+  test("uses vite when the vite runner is selected", () => {
+    expect(
+      build_development_command({
+        app_name: "demo-app",
+        extra_args: [],
+        portless_enabled: false,
+        runner: "vite",
+        use_varlock: false,
+      }),
+    ).toEqual(["vite", "dev", "--host", "127.0.0.1", "--clearScreen", "false"]);
   });
 });

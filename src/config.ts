@@ -64,6 +64,9 @@ export type Devtree_config = {
     https?: boolean | "inherit";
     bootstrap?: "best-effort" | "manual";
   };
+  dev_server?: {
+    runner?: "vite-plus" | "vite";
+  };
   env: {
     provider: "dotenv" | "varlock";
     file_path?: string;
