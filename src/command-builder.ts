@@ -1,3 +1,5 @@
+import { PORTLESS_EXACT_HOSTNAME_FLAG } from "./portless.ts";
+
 export function strip_passthrough_delimiter(args: string[]) {
   return args[0] === "--" ? args.slice(1) : args;
 }
@@ -24,8 +26,24 @@ export function build_vite_dev_command(
   ];
 }
 
-export function build_portless_command(app_name: string, command_parts: string[]) {
-  return ["portless", "run", "--force", "--name", app_name, "--", ...command_parts];
+export function build_portless_command(
+  route_name: string,
+  command_parts: string[],
+  exact_hostname = false,
+) {
+  if (exact_hostname) {
+    return [
+      "portless",
+      "run",
+      "--force",
+      PORTLESS_EXACT_HOSTNAME_FLAG,
+      route_name,
+      "--",
+      ...command_parts,
+    ];
+  }
+
+  return ["portless", "run", "--force", "--name", route_name, "--", ...command_parts];
 }
 
 export function build_varlock_command(command_parts: string[]) {
@@ -34,6 +52,8 @@ export function build_varlock_command(command_parts: string[]) {
 
 export function build_development_command(options: {
   app_name: string;
+  public_hostname?: string;
+  portless_exact_hostname?: boolean;
   extra_args: string[];
   portless_enabled: boolean;
   runner?: Dev_server_runner;
@@ -47,7 +67,19 @@ export function build_development_command(options: {
   );
 
   if (options.portless_enabled) {
-    command_parts = build_portless_command(options.app_name, command_parts);
+    const route_name = options.portless_exact_hostname
+      ? options.public_hostname
+      : options.app_name;
+
+    if (!route_name) {
+      throw new Error("A public hostname is required for exact Portless route registration.");
+    }
+
+    command_parts = build_portless_command(
+      route_name,
+      command_parts,
+      options.portless_exact_hostname,
+    );
   }
 
   if (options.use_varlock) {

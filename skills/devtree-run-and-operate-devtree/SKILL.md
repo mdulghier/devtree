@@ -68,7 +68,9 @@ pnpm devtree dev
 pnpm devtree info
 ```
 
-`info` prints the public URL, app name, instance ID, scoped name, worktree path, env provider, env file, and Compose project names.
+`info` prints the public URL and hostname, Portless state, Tailscale mode, app name, instance ID, scoped name, worktree identity, env provider, env file, and Compose project names.
+
+In `portless-proxy` mode, `doctor` also checks that the canonical hostname resolves, Tailscale is connected, Portless supports exact hostname registration, and Vite remains on `127.0.0.1`. DNS, tailnet policy, and the shared Tailscale TCP forward remain infrastructure responsibilities.
 
 ### Clean up orphaned Docker resources safely
 

@@ -4,6 +4,15 @@ import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 
 import type { Devtree_config, Loaded_devtree_config } from "./config.ts";
+import {
+  create_portless_worktree_slug,
+  format_public_url,
+  resolve_configured_public_hostname,
+  resolve_legacy_public_hostname,
+  resolve_portless_https,
+  resolve_portless_port,
+  slugify,
+} from "./hostname.ts";
 
 export type Devtree_instance = {
   app_name: string;
@@ -14,6 +23,7 @@ export type Devtree_instance = {
   instance_id: string;
   scoped_name: string;
   env_file_path: string;
+  public_hostname: string;
   public_url: string;
   label_prefix: string;
   registry_namespace: string;
@@ -21,13 +31,6 @@ export type Devtree_instance = {
   get_scoped_name: (suffix?: string) => string;
   allocate_port: (name: string, base_port: number, span?: number) => number;
 };
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 function get_parent_worktree_slug(repo_root: string, repo_slug: string) {
   const parent_slug = slugify(basename(dirname(repo_root)));
@@ -54,13 +57,13 @@ function read_worktree_slug(repo_root: string, repo_slug: string) {
   const worktree_match = git_file_text.match(/[\\/]+worktrees[\\/]+([^\\/ \n\r]+)/);
 
   if (!worktree_match?.[1]) {
-    return null;
+    return get_parent_worktree_slug(repo_root, repo_slug) ?? `worktree-${get_hash_suffix(repo_root)}`;
   }
 
   const git_worktree_slug = slugify(worktree_match[1]);
 
   if (!git_worktree_slug || git_worktree_slug === repo_slug) {
-    return get_parent_worktree_slug(repo_root, repo_slug);
+    return get_parent_worktree_slug(repo_root, repo_slug) ?? `worktree-${get_hash_suffix(repo_root)}`;
   }
 
   return git_worktree_slug;
@@ -70,7 +73,7 @@ function get_hash_suffix(value: string) {
   return createHash("sha1").update(value).digest("hex").slice(0, 8);
 }
 
-function read_branch_slug(repo_root: string) {
+function read_branch_name(repo_root: string) {
   const branch_result = spawnSync("git", ["branch", "--show-current"], {
     cwd: repo_root,
     encoding: "utf8",
@@ -87,16 +90,7 @@ function read_branch_slug(repo_root: string) {
     return null;
   }
 
-  return slugify(branch_name.split("/").at(-1) ?? branch_name);
-}
-
-function get_public_url(app_name: string, route_prefix: string | null) {
-  const protocol = process.env.PORTLESS_HTTPS === "1" ? "https" : "http";
-  const tld = process.env.PORTLESS_TLD?.trim() || "localhost";
-  const proxy_port = process.env.PORTLESS_PORT?.trim() || "1355";
-  const host = route_prefix ? `${route_prefix}.${app_name}` : app_name;
-
-  return `${protocol}://${host}.${tld}:${proxy_port}`;
+  return branch_name;
 }
 
 function get_namespace(config: Devtree_config) {
@@ -108,7 +102,10 @@ export function create_devtree_instance(loaded_config: Loaded_devtree_config): D
   const namespace = get_namespace(loaded_config.config);
   const worktree_path = loaded_config.repo_root;
   const worktree_slug = read_worktree_slug(loaded_config.repo_root, namespace);
-  const branch_slug = worktree_slug ? read_branch_slug(loaded_config.repo_root) : null;
+  const branch_name = worktree_slug ? read_branch_name(loaded_config.repo_root) : null;
+  const branch_slug = branch_name
+    ? slugify(branch_name.split("/").at(-1) ?? branch_name)
+    : null;
   const instance_id = get_hash_suffix(worktree_path);
   const scoped_name = `${namespace}-${instance_id}`;
   const env_file_path = resolve(
@@ -119,6 +116,23 @@ export function create_devtree_instance(loaded_config: Loaded_devtree_config): D
     loaded_config.config.garbage_collection?.docker_label_prefix?.trim() || "devtree";
   const registry_namespace =
     loaded_config.config.garbage_collection?.registry_namespace?.trim() || namespace;
+  const canonical_worktree_slug = loaded_config.config.portless?.hostname && worktree_slug
+    ? create_portless_worktree_slug(
+        branch_name ?? worktree_slug,
+        app_name,
+        `${worktree_path}:${instance_id}`,
+      )
+    : null;
+  const public_hostname =
+    resolve_configured_public_hostname(loaded_config.config, {
+      app_name,
+      worktree_slug: canonical_worktree_slug,
+    }) ?? resolve_legacy_public_hostname(app_name, branch_slug ?? worktree_slug);
+  const public_url = format_public_url(
+    public_hostname,
+    resolve_portless_https(loaded_config.config),
+    resolve_portless_port(loaded_config.config),
+  );
 
   return {
     app_name,
@@ -129,7 +143,8 @@ export function create_devtree_instance(loaded_config: Loaded_devtree_config): D
     instance_id,
     scoped_name,
     env_file_path,
-    public_url: get_public_url(app_name, branch_slug ?? worktree_slug),
+    public_hostname,
+    public_url,
     label_prefix,
     registry_namespace,
     portless_enabled:

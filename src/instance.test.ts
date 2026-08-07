@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+
 import { describe, expect, test } from "vite-plus/test";
 
 import { create_devtree_instance } from "./instance.ts";
@@ -19,6 +23,70 @@ function create_loaded_config(repo_root: string): Loaded_devtree_config {
 }
 
 describe("create_devtree_instance", () => {
+  test("keeps the legacy main-checkout public URL", () => {
+    const instance = create_devtree_instance(create_loaded_config("/tmp/devtree-main-checkout"));
+
+    expect(instance.public_hostname).toBe("demo-app.localhost");
+    expect(instance.public_url).toBe("http://demo-app.localhost:1355");
+  });
+
+  test("uses the configured canonical hostname as the URL source of truth", () => {
+    const loaded_config = create_loaded_config("/tmp/devtree-canonical-checkout");
+
+    loaded_config.config.portless = {
+      hostname: ({ app_name }) => `${app_name}.developer.dev.example.com`,
+      port: 1355,
+      https: false,
+    };
+
+    const instance = create_devtree_instance(loaded_config);
+
+    expect(instance.public_hostname).toBe("demo-app.developer.dev.example.com");
+    expect(instance.public_url).toBe("http://demo-app.developer.dev.example.com:1355");
+  });
+
+  test("keeps the legacy worktree URL shape", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
+    const loaded_config = create_loaded_config(repo_root);
+
+    writeFileSync(
+      resolve(repo_root, ".git"),
+      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
+    );
+
+    const instance = create_devtree_instance(loaded_config);
+
+    expect(instance.public_hostname).toBe("feature-123.demo-app.localhost");
+    expect(instance.public_url).toBe("http://feature-123.demo-app.localhost:1355");
+
+    rmSync(repo_root, { force: true, recursive: true });
+  });
+
+  test("passes a flattened worktree identity to the canonical hostname callback", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
+    const loaded_config = create_loaded_config(repo_root);
+
+    loaded_config.config.portless = {
+      hostname: ({ app_name, worktree_slug }) => {
+        const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
+
+        return `${route_name}.developer.dev.example.com`;
+      },
+    };
+    writeFileSync(
+      resolve(repo_root, ".git"),
+      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
+    );
+
+    const instance = create_devtree_instance(loaded_config);
+
+    expect(instance.public_hostname).toBe(
+      "feature-123--demo-app.developer.dev.example.com",
+    );
+
+    rmSync(repo_root, { force: true, recursive: true });
+  });
+
   test("creates deterministic instance ids and scoped names", () => {
     const first_instance = create_devtree_instance(create_loaded_config("/tmp/worktree-one"));
     const second_instance = create_devtree_instance(create_loaded_config("/tmp/worktree-one"));

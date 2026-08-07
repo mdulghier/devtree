@@ -1,4 +1,4 @@
-# AGENTS.md instructions for /Users/markus/code/devtree
+# AGENTS.md instructions
 
 ## Rules
 

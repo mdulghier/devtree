@@ -7,6 +7,8 @@ export type {
   Devtree_config,
   Devtree_dependency,
   Managed_env_entry,
+  Portless_hostname_context,
+  Tailscale_mode,
 } from "./config.ts";
 export { create_devtree_instance } from "./instance.ts";
 export type { Devtree_instance } from "./instance.ts";

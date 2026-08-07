@@ -85,6 +85,8 @@ Set `dev_server.runner` to `"vite"` if the app uses plain Vite and should launch
 
 If you enable `tailscale`, Devtree checks for the `tailscale` CLI, reads the machine's MagicDNS hostname, starts Vite on `0.0.0.0`, and adds that hostname to Vite's allowed hosts so the dev server can be reached over Tailscale.
 
+This existing behavior is the legacy `direct` mode. For a shared Portless proxy exposed through Tailscale, use `portless-proxy` mode as described below; that mode keeps Vite on `127.0.0.1`.
+
 ### 3. Register the Vite plugin
 
 Use your app's existing config helper. Plain Vite apps import from `vite`; VitePlus apps can keep importing from `vite-plus`.
@@ -123,9 +125,9 @@ pnpm devtree gc --dry-run
 ```
 
 - `doctor --fix` checks prerequisites, bootstraps `portless`, and validates Tailscale when `tailscale.enabled` is on
-- `setup` writes env overrides, starts dependencies, runs hooks, and reports the detected Tailscale host
+- `setup` resolves and validates the public hostname, writes env overrides, starts dependencies, and runs hooks
 - `dev` starts the app through Devtree
-- `info` prints the current instance URL and names
+- `info` prints the public URL and hostname, Tailscale mode, Portless state, and instance names
 - `gc` removes orphaned dependency resources from deleted worktrees
 
 Other commands:
@@ -150,11 +152,99 @@ pnpm devtree config tailscale.enabled
 
 Add `dependencies` and `hooks` in `devtree.config.ts` when you want Compose services, custom setup steps, migrations, or pre-dev commands.
 
-### Tailscale Notes
+### Canonical Portless Hostnames
 
-- Turn it on with `tailscale: { enabled: true }` in `devtree.config.ts`.
+Use `portless.hostname` when one complete hostname must work both on the Devtree machine and from the tailnet. The callback receives the normalized logical app name and a collision-resistant worktree slug. The worktree slug is `null` in the primary checkout.
+
+Keep developer-specific values in the machine environment, not in `devtree.config.ts`:
+
+```bash
+export DEVTREE_DEVELOPER_NAMESPACE=developer
+export DEVTREE_PUBLIC_DOMAIN=dev.example.com
+```
+
+A complete consumer configuration is:
+
+```ts
+import { define_devtree_config } from "devtree";
+
+function read_required_env(name: string) {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`${name} is required for the canonical Devtree hostname`);
+  }
+
+  return value;
+}
+
+export default define_devtree_config({
+  app_name: "web-ui",
+  portless: {
+    hostname: ({ app_name, worktree_slug }) => {
+      const developer_namespace = read_required_env("DEVTREE_DEVELOPER_NAMESPACE");
+      const public_domain = read_required_env("DEVTREE_PUBLIC_DOMAIN");
+      const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
+
+      return `${route_name}.${developer_namespace}.${public_domain}`;
+    },
+    port: 1355,
+    https: false,
+  },
+  tailscale: {
+    enabled: true,
+    mode: "portless-proxy",
+  },
+  env: {
+    provider: "dotenv",
+    entries: ({ instance }) => [
+      {
+        kind: "value",
+        key: "APP_URL",
+        value: instance.public_url,
+      },
+    ],
+  },
+});
+```
+
+This produces URLs such as:
+
+```text
+http://web-ui.developer.dev.example.com:1355
+http://feature-123--web-ui.developer.dev.example.com:1355
+```
+
+Devtree lowercases and validates the complete hostname. DNS labels must use letters, digits, and interior hyphens, each label must be at most 63 characters, and the hostname must be at most 253 characters. Branch names that need normalization or truncation receive a stable short hash so distinct source names do not silently collapse onto the same route. A detached checkout falls back to its worktree identity.
+
+`instance.public_hostname` and `instance.public_url` expose the resolved values. Managed child processes receive `DEVTREE_PUBLIC_HOSTNAME`, `DEVTREE_PUBLIC_URL`, and `DEVTREE_TAILSCALE_MODE`. In `portless-proxy` mode, `DEVTREE_TAILSCALE_HOST` is intentionally unset because the machine's MagicDNS name is not the application hostname.
+
+Without `portless.hostname`, behavior is unchanged:
+
+```text
+http://<app>.localhost:1355
+http://<worktree>.<app>.localhost:1355
+```
+
+#### Portless Exact-Hostname Contract
+
+Canonical routing requires this Portless CLI contract:
+
+```text
+portless run --force --hostname <complete-hostname> -- <command>
+```
+
+`--hostname` must register the supplied hostname exactly and must not add Portless's own worktree prefix. Devtree deliberately checks `portless run --help` for this contract before setup or development. Portless 0.15.5 does not yet expose the flag, so canonical mode reports an actionable compatibility error instead of silently registering a different hostname. No `node_modules` patch or alias-route workaround is used.
+
+### Tailscale Modes
+
+- `tailscale: { enabled: true }` remains source- and runtime-compatible and means legacy direct mode.
+- `tailscale: { enabled: true, mode: "direct" }` explicitly selects the same behavior: Devtree binds Vite to `0.0.0.0` and allowlists the machine's MagicDNS host.
+- `tailscale: { enabled: true, mode: "portless-proxy" }` keeps Vite on `127.0.0.1`, uses the canonical Portless hostname, and expects Portless to own the single shared Tailscale TCP forwarding endpoint.
 - Install the `tailscale` CLI and make sure you're logged in on the machine running `devtree dev`.
-- `devtree doctor` fails when Tailscale is enabled but the CLI or MagicDNS hostname is unavailable.
-- `devtree setup`, `devtree dev`, and `devtree info` surface the detected Tailscale host so you can verify the integration quickly.
+- In proxy mode, `devtree doctor` checks the hostname callback, exact-hostname Portless compatibility, Tailscale connectivity, DNS resolution, and loopback-only Vite binding.
+- DNS records, Tailscale policy, and the shared TCP forward are infrastructure responsibilities. Devtree diagnoses them but never modifies DNS, `/etc/hosts`, or tailnet administration.
+
+To migrate from direct exposure, first provision DNS and the one shared Tailscale-to-Portless TCP forward outside Devtree. Then add `portless.hostname`, set `portless.port`, and select `portless-proxy`. Run `pnpm devtree doctor` before `setup`; do not remove the direct-mode configuration until the Portless exact-hostname contract is available on every developer machine.
 
 If you use an AI agent, run `npx @tanstack/intent@latest install`.

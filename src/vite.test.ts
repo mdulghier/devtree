@@ -31,11 +31,14 @@ function run_config_hook(plugin: { config?: unknown }, user_config: Record<strin
 }
 
 afterEach(() => {
+  delete process.env.DEVTREE_PUBLIC_HOSTNAME;
+  delete process.env.DEVTREE_TAILSCALE_MODE;
   delete process.env.DEVTREE_TAILSCALE_HOST;
 });
 
 describe("devtree_vite_plugins", () => {
   test("adds the tailscale host to Vite allowed hosts", async () => {
+    process.env.DEVTREE_TAILSCALE_MODE = "direct";
     process.env.DEVTREE_TAILSCALE_HOST = "devbox.example.ts.net";
     const [plugin] = await devtree_vite_plugins(base_config);
     const next_config = run_config_hook(plugin, { server: { allowedHosts: ["app.local"] } });
@@ -48,6 +51,7 @@ describe("devtree_vite_plugins", () => {
   });
 
   test("does not override allowedHosts when already fully open", async () => {
+    process.env.DEVTREE_TAILSCALE_MODE = "direct";
     process.env.DEVTREE_TAILSCALE_HOST = "devbox.example.ts.net";
     const [plugin] = await devtree_vite_plugins(base_config);
     const next_config = run_config_hook(plugin, { server: { allowedHosts: true } }) as {
@@ -55,5 +59,30 @@ describe("devtree_vite_plugins", () => {
     };
 
     expect(next_config?.server?.allowedHosts).toBe(true);
+  });
+
+  test("adds the exact canonical public hostname", async () => {
+    process.env.DEVTREE_PUBLIC_HOSTNAME = "feature-123--web-ui.developer.dev.example.com";
+    process.env.DEVTREE_TAILSCALE_MODE = "portless-proxy";
+    const [plugin] = await devtree_vite_plugins(base_config);
+    const next_config = run_config_hook(plugin, { server: { allowedHosts: ["app.local"] } });
+
+    expect(next_config).toMatchObject({
+      server: {
+        allowedHosts: ["app.local", "feature-123--web-ui.developer.dev.example.com"],
+      },
+    });
+  });
+
+  test("does not treat the MagicDNS host as the app host in proxy mode", async () => {
+    process.env.DEVTREE_PUBLIC_HOSTNAME = "web-ui.developer.dev.example.com";
+    process.env.DEVTREE_TAILSCALE_MODE = "portless-proxy";
+    process.env.DEVTREE_TAILSCALE_HOST = "devbox.example.ts.net";
+    const [plugin] = await devtree_vite_plugins(base_config);
+    const next_config = run_config_hook(plugin, {}) as {
+      server?: { allowedHosts?: string[] };
+    };
+
+    expect(next_config.server?.allowedHosts).toEqual(["web-ui.developer.dev.example.com"]);
   });
 });

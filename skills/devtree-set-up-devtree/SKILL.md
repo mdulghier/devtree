@@ -107,6 +107,8 @@ export default define_devtree_config({
 
 Use `instance.public_url`, `instance.get_scoped_name()` and `instance.allocate_port()` instead of fixed local values.
 
+For one canonical hostname that is also reachable through a shared Tailscale-to-Portless proxy, configure `portless.hostname` as a callback, set `tailscale.mode` to `'portless-proxy'`, and keep developer namespace/domain values in machine environment variables. The callback receives `{ app_name, worktree_slug }`; flatten worktree routes as `${worktree_slug}--${app_name}`. Validate required environment variables before returning the complete hostname.
+
 ### Start Docker dependencies through config
 
 ```ts

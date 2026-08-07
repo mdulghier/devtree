@@ -8,7 +8,11 @@ function create_core_devtree_plugin(): Plugin {
     apply: "serve",
     config(user_config) {
       const next_config: UserConfig = {};
-      const tailscale_host = process.env.DEVTREE_TAILSCALE_HOST?.trim();
+      const public_hostname = process.env.DEVTREE_PUBLIC_HOSTNAME?.trim();
+      const tailscale_host =
+        process.env.DEVTREE_TAILSCALE_MODE === "portless-proxy"
+          ? undefined
+          : process.env.DEVTREE_TAILSCALE_HOST?.trim();
 
       if (!user_config.server?.host) {
         next_config.server = {
@@ -17,16 +21,25 @@ function create_core_devtree_plugin(): Plugin {
         };
       }
 
-      if (tailscale_host && user_config.server?.allowedHosts !== true) {
-        const allowed_hosts = user_config.server?.allowedHosts ?? [];
+      const devtree_allowed_hosts = [public_hostname, tailscale_host].filter(
+        (hostname): hostname is string => Boolean(hostname),
+      );
 
-        if (!allowed_hosts.includes(tailscale_host)) {
-          next_config.server = {
-            ...next_config.server,
-            ...user_config.server,
-            allowedHosts: [...allowed_hosts, tailscale_host],
-          };
+      if (devtree_allowed_hosts.length > 0 && user_config.server?.allowedHosts !== true) {
+        const allowed_hosts = user_config.server?.allowedHosts ?? [];
+        const next_allowed_hosts = [...allowed_hosts];
+
+        for (const hostname of devtree_allowed_hosts) {
+          if (!next_allowed_hosts.includes(hostname)) {
+            next_allowed_hosts.push(hostname);
+          }
         }
+
+        next_config.server = {
+          ...next_config.server,
+          ...user_config.server,
+          allowedHosts: next_allowed_hosts,
+        };
       }
 
       if (user_config.clearScreen === undefined) {

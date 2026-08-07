@@ -17,6 +17,13 @@ export type Managed_env_entry =
 
 export type Resolved_env_map = Record<string, string | undefined>;
 
+export type Portless_hostname_context = {
+  app_name: string;
+  worktree_slug: string | null;
+};
+
+export type Tailscale_mode = "direct" | "portless-proxy";
+
 export type Command_spec_context = {
   config: Devtree_config;
   instance: Devtree_instance;
@@ -58,9 +65,12 @@ export type Devtree_config = {
   namespace?: string;
   tailscale?: {
     enabled?: boolean;
+    mode?: Tailscale_mode;
   };
   portless?: {
     enabled?: boolean;
+    hostname?: (context: Portless_hostname_context) => string;
+    port?: number;
     https?: boolean | "inherit";
     bootstrap?: "best-effort" | "manual";
   };

@@ -35,6 +35,39 @@ function create_loaded_config(repo_root: string): Loaded_devtree_config {
 }
 
 describe("ensure_env_file", () => {
+  test("passes the canonical public URL to managed environment callbacks", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-env-test-"));
+    const loaded_config: Loaded_devtree_config = {
+      config: {
+        app_name: "web-ui",
+        portless: {
+          hostname: ({ app_name }) => `${app_name}.developer.dev.example.com`,
+        },
+        env: {
+          provider: "dotenv",
+          file_path: ".env.test-managed",
+          entries: ({ instance }) => [
+            {
+              kind: "value",
+              key: "APP_URL",
+              value: instance.public_url,
+            },
+          ],
+        },
+      },
+      config_path: `${repo_root}/devtree.config.ts`,
+      repo_root,
+    };
+    const instance = create_devtree_instance(loaded_config);
+    const result = ensure_env_file(loaded_config, instance);
+
+    expect(result.managed_env_values.APP_URL).toBe(
+      "http://web-ui.developer.dev.example.com:1355",
+    );
+
+    rmSync(repo_root, { force: true, recursive: true });
+  });
+
   test("writes managed env values", () => {
     const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-env-test-"));
     const loaded_config = create_loaded_config(repo_root);
