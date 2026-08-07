@@ -1,7 +1,7 @@
 import type { Devtree_config, Tailscale_mode } from "./config.ts";
 import { command_exists, run_command_capture } from "./process.ts";
 
-export type Resolved_tailscale_mode = "disabled" | Tailscale_mode;
+export type Resolved_tailscale_mode = "disabled" | "direct" | "proxy";
 
 export type Resolved_tailscale = {
   enabled: boolean;
@@ -29,7 +29,9 @@ export function get_tailscale_mode(config: Devtree_config): Resolved_tailscale_m
     return "disabled";
   }
 
-  return config.tailscale?.mode ?? "direct";
+  const configured_mode: Tailscale_mode = config.tailscale?.mode ?? "direct";
+
+  return configured_mode === "portless-proxy" ? "proxy" : configured_mode;
 }
 
 export function parse_tailscale_host(status_json: string) {

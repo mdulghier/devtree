@@ -1,0 +1,20 @@
+{
+  "name": "devtree-example-caddy-hosts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "devtree": "devtree"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "devtree": "link:../..",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

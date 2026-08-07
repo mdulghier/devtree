@@ -8,7 +8,11 @@ export type {
   Devtree_dependency,
   Managed_env_entry,
   Portless_hostname_context,
+  Routing_hostname_context,
+  Routing_provider,
   Tailscale_mode,
 } from "./config.ts";
 export { create_devtree_instance } from "./instance.ts";
 export type { Devtree_instance } from "./instance.ts";
+export { resolve_routing } from "./routing.ts";
+export type { Resolved_routing, Routing_provider_kind } from "./routing.ts";

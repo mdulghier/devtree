@@ -16,6 +16,7 @@ export function create_runtime_env(
     DEVTREE_NAMESPACE: instance.registry_namespace,
     DEVTREE_PUBLIC_HOSTNAME: instance.public_hostname,
     DEVTREE_PUBLIC_URL: instance.public_url,
+    DEVTREE_ROUTING_PROVIDER: instance.routing_provider,
     DEVTREE_TAILSCALE_ENABLED: tailscale.enabled ? "1" : "0",
     DEVTREE_TAILSCALE_MODE: tailscale.mode,
     DEVTREE_TAILSCALE_HOST:

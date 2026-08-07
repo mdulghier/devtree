@@ -1,0 +1,29 @@
+services:
+  database:
+    image: postgres:17
+    ports:
+      - "${DATABASE_PORT}:5432"
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - database-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "${REDIS_PORT}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+volumes:
+  database-data:

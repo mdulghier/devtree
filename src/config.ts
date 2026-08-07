@@ -17,12 +17,24 @@ export type Managed_env_entry =
 
 export type Resolved_env_map = Record<string, string | undefined>;
 
-export type Portless_hostname_context = {
+export type Routing_hostname_context = {
   app_name: string;
   worktree_slug: string | null;
 };
 
-export type Tailscale_mode = "direct" | "portless-proxy";
+export type Portless_hostname_context = Routing_hostname_context;
+
+export type Routing_provider =
+  | {
+      kind: "portless";
+    }
+  | {
+      kind: "caddy";
+      admin_url?: string;
+      bootstrap?: "best-effort" | "manual";
+    };
+
+export type Tailscale_mode = "direct" | "proxy" | "portless-proxy";
 
 export type Command_spec_context = {
   config: Devtree_config;
@@ -63,6 +75,12 @@ export type Devtree_dependency = Compose_dependency | Command_dependency;
 export type Devtree_config = {
   app_name: string;
   namespace?: string;
+  routing?: {
+    provider?: Routing_provider;
+    hostname?: (context: Routing_hostname_context) => string;
+    port?: number;
+    https?: boolean;
+  };
   tailscale?: {
     enabled?: boolean;
     mode?: Tailscale_mode;

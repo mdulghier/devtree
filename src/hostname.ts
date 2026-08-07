@@ -5,6 +5,7 @@ import type {
   Portless_hostname_context,
   Resolved_env_map,
 } from "./config.ts";
+import { resolve_routing } from "./routing.ts";
 
 const DNS_LABEL_MAX_LENGTH = 63;
 const DNS_HOSTNAME_MAX_LENGTH = 253;
@@ -105,11 +106,15 @@ export function resolve_configured_public_hostname(
   config: Devtree_config,
   context: Portless_hostname_context,
 ) {
-  const hostname_resolver = config.portless?.hostname;
+  const hostname_resolver = config.routing
+    ? config.routing.hostname
+    : config.portless?.hostname;
 
   if (!hostname_resolver) {
     return null;
   }
+
+  const setting_name = config.routing ? "routing.hostname" : "portless.hostname";
 
   let resolved_hostname: string;
 
@@ -118,13 +123,13 @@ export function resolve_configured_public_hostname(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Could not resolve portless.hostname. Check its required machine-local environment variables. ${message}`,
+      `Could not resolve ${setting_name}. Check its required machine-local environment variables. ${message}`,
     );
   }
 
   if (typeof resolved_hostname !== "string" || !resolved_hostname.trim()) {
     throw new Error(
-      "portless.hostname must return a complete hostname. Check its required machine-local environment variables.",
+      `${setting_name} must return a complete hostname. Check its required machine-local environment variables.`,
     );
   }
 
@@ -135,11 +140,11 @@ export function resolve_configured_public_hostname(
 
   if (placeholder_label) {
     throw new Error(
-      `portless.hostname resolved to the placeholder label "${placeholder_label}". Check its required machine-local environment variables.`,
+      `${setting_name} resolved to the placeholder label "${placeholder_label}". Check its required machine-local environment variables.`,
     );
   }
 
-  return validate_public_hostname(hostname, "portless.hostname");
+  return validate_public_hostname(hostname, setting_name);
 }
 
 export function resolve_legacy_public_hostname(
@@ -157,26 +162,14 @@ export function resolve_portless_https(
   config: Devtree_config,
   env: Resolved_env_map = process.env,
 ) {
-  const https_preference = config.portless?.https ?? "inherit";
-
-  return https_preference === "inherit"
-    ? env.PORTLESS_HTTPS?.trim() === "1"
-    : https_preference;
+  return resolve_routing(config, env).https;
 }
 
 export function resolve_portless_port(
   config: Devtree_config,
   env: Resolved_env_map = process.env,
 ) {
-  const configured_port = config.portless?.port;
-  const raw_port = configured_port ?? env.PORTLESS_PORT?.trim() ?? 1355;
-  const proxy_port = typeof raw_port === "number" ? raw_port : Number(raw_port);
-
-  if (!Number.isInteger(proxy_port) || proxy_port < 1 || proxy_port > 65535) {
-    throw new Error(`Portless proxy port "${raw_port}" must be an integer from 1 to 65535.`);
-  }
-
-  return proxy_port;
+  return resolve_routing(config, env).port;
 }
 
 export function format_public_url(hostname: string, https: boolean, proxy_port: number) {

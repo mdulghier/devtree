@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -45,6 +45,47 @@ describe("create_devtree_instance", () => {
     expect(instance.public_url).toBe("http://demo-app.developer.dev.example.com:1355");
   });
 
+  test("uses routing.hostname as the Caddy route and URL source of truth", () => {
+    const loaded_config = create_loaded_config("/tmp/devtree-caddy-checkout");
+
+    loaded_config.config.routing = {
+      provider: { kind: "caddy" },
+      hostname: ({ app_name }) => `${app_name}.alice.dev.example.com`,
+      port: 1355,
+      https: false,
+    };
+
+    const instance = create_devtree_instance(loaded_config);
+
+    expect(instance.routing_provider).toBe("caddy");
+    expect(instance.routing_enabled).toBe(true);
+    expect(instance.portless_enabled).toBe(false);
+    expect(instance.public_hostname).toBe("demo-app.alice.dev.example.com");
+    expect(instance.public_url).toBe("http://demo-app.alice.dev.example.com:1355");
+  });
+
+  test("uses localhost for new routing config without a custom hostname", () => {
+    const loaded_config = create_loaded_config("/tmp/devtree-caddy-localhost");
+    const previous_tld = process.env.PORTLESS_TLD;
+
+    loaded_config.config.routing = {
+      provider: { kind: "caddy" },
+    };
+    process.env.PORTLESS_TLD = "legacy.example.com";
+
+    try {
+      const instance = create_devtree_instance(loaded_config);
+
+      expect(instance.public_hostname).toBe("demo-app.localhost");
+    } finally {
+      if (previous_tld === undefined) {
+        delete process.env.PORTLESS_TLD;
+      } else {
+        process.env.PORTLESS_TLD = previous_tld;
+      }
+    }
+  });
+
   test("keeps the legacy worktree URL shape", () => {
     const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
     const loaded_config = create_loaded_config(repo_root);
@@ -60,6 +101,24 @@ describe("create_devtree_instance", () => {
     expect(instance.public_url).toBe("http://feature-123.demo-app.localhost:1355");
 
     rmSync(repo_root, { force: true, recursive: true });
+  });
+
+  test("detects a worktree when the Devtree project is inside the Git worktree", () => {
+    const git_root = mkdtempSync(resolve(tmpdir(), "devtree-nested-example-"));
+    const repo_root = resolve(git_root, "examples", "simple-portless");
+
+    mkdirSync(repo_root, { recursive: true });
+    writeFileSync(
+      resolve(git_root, ".git"),
+      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
+    );
+
+    const instance = create_devtree_instance(create_loaded_config(repo_root));
+
+    expect(instance.worktree_slug).toBe("feature-123");
+    expect(instance.public_hostname).toBe("feature-123.demo-app.localhost");
+
+    rmSync(git_root, { force: true, recursive: true });
   });
 
   test("passes a flattened worktree identity to the canonical hostname callback", () => {

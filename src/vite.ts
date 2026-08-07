@@ -10,6 +10,7 @@ function create_core_devtree_plugin(): Plugin {
       const next_config: UserConfig = {};
       const public_hostname = process.env.DEVTREE_PUBLIC_HOSTNAME?.trim();
       const tailscale_host =
+        process.env.DEVTREE_TAILSCALE_MODE === "proxy" ||
         process.env.DEVTREE_TAILSCALE_MODE === "portless-proxy"
           ? undefined
           : process.env.DEVTREE_TAILSCALE_HOST?.trim();

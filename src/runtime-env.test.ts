@@ -41,12 +41,13 @@ describe("create_runtime_env", () => {
     const runtime_env = create_runtime_env(
       instance,
       {},
-      create_tailscale("portless-proxy"),
+      create_tailscale("proxy"),
     );
 
     expect(runtime_env.DEVTREE_PUBLIC_HOSTNAME).toBe("web-ui.developer.dev.example.com");
     expect(runtime_env.DEVTREE_PUBLIC_URL).toBe("http://web-ui.developer.dev.example.com:1355");
-    expect(runtime_env.DEVTREE_TAILSCALE_MODE).toBe("portless-proxy");
+    expect(runtime_env.DEVTREE_ROUTING_PROVIDER).toBe("portless");
+    expect(runtime_env.DEVTREE_TAILSCALE_MODE).toBe("proxy");
     expect(runtime_env.DEVTREE_TAILSCALE_HOST).toBeUndefined();
   });
 

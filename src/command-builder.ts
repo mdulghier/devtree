@@ -1,4 +1,5 @@
 import { PORTLESS_EXACT_HOSTNAME_FLAG } from "./portless.ts";
+import type { Routing_provider_kind } from "./routing.ts";
 
 export function strip_passthrough_delimiter(args: string[]) {
   return args[0] === "--" ? args.slice(1) : args;
@@ -14,6 +15,7 @@ export function build_vite_dev_command(
   extra_args: string[],
   host = "127.0.0.1",
   runner: Dev_server_runner = "vite-plus",
+  port?: number,
 ) {
   return [
     get_dev_server_command(runner),
@@ -23,6 +25,7 @@ export function build_vite_dev_command(
     "--clearScreen",
     "false",
     ...extra_args,
+    ...(port === undefined ? [] : ["--port", String(port), "--strictPort"]),
   ];
 }
 
@@ -56,17 +59,34 @@ export function build_development_command(options: {
   portless_exact_hostname?: boolean;
   extra_args: string[];
   portless_enabled: boolean;
+  routing_provider?: Routing_provider_kind;
   runner?: Dev_server_runner;
   vite_host?: string;
+  vite_port?: number;
   use_varlock: boolean;
 }) {
+  const routing_provider = options.routing_provider ?? "portless";
+
+  if (routing_provider === "caddy" && options.vite_port === undefined) {
+    throw new Error("A fixed Vite port is required when Caddy routing is enabled.");
+  }
+
+  if (
+    routing_provider === "caddy" &&
+    options.vite_host !== undefined &&
+    options.vite_host !== "127.0.0.1"
+  ) {
+    throw new Error("Caddy routing requires Vite to stay on 127.0.0.1.");
+  }
+
   let command_parts = build_vite_dev_command(
     strip_passthrough_delimiter(options.extra_args),
     options.vite_host,
     options.runner,
+    options.vite_port,
   );
 
-  if (options.portless_enabled) {
+  if (routing_provider === "portless" && options.portless_enabled) {
     const route_name = options.portless_exact_hostname
       ? options.public_hostname
       : options.app_name;

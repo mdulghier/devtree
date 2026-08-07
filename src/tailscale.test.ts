@@ -41,6 +41,16 @@ describe("parse_tailscale_host", () => {
       env: { provider: "dotenv", entries: () => [] },
     };
 
-    expect(get_tailscale_mode(config)).toBe("portless-proxy");
+    expect(get_tailscale_mode(config)).toBe("proxy");
+  });
+
+  test("resolves the provider-neutral proxy mode", () => {
+    const config: Devtree_config = {
+      app_name: "demo",
+      tailscale: { enabled: true, mode: "proxy" },
+      env: { provider: "dotenv", entries: () => [] },
+    };
+
+    expect(get_tailscale_mode(config)).toBe("proxy");
   });
 });

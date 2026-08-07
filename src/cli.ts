@@ -9,6 +9,13 @@ import type {
   Compose_dependency,
   Loaded_devtree_config,
 } from "./config.ts";
+import {
+  create_caddy_route,
+  get_caddy_route_id,
+  register_caddy_route,
+  remove_caddy_route,
+} from "./caddy.ts";
+import { ensure_caddy_process } from "./caddy-process.ts";
 import { load_devtree_config } from "./config.ts";
 import { format_config_value, get_config_value, set_config_value } from "./config-command.ts";
 import {
@@ -16,8 +23,18 @@ import {
   get_dev_server_command,
   type Dev_server_runner,
 } from "./command-builder.ts";
+import {
+  get_proxy_mode_configuration_error,
+  is_proxy_tailscale_mode,
+} from "./doctor.ts";
 import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
 import { run_gc } from "./gc.ts";
+import {
+  format_local_hosts_section,
+  format_tailscale_hosts_section,
+  is_localhost_hostname,
+  resolve_tailscale_ipv4,
+} from "./hosts.ts";
 import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
 import { resolve_portless_https, resolve_portless_port } from "./hostname.ts";
 import { get_portless_compatibility_error } from "./portless.ts";
@@ -25,9 +42,11 @@ import {
   command_exists,
   run_command_capture,
   run_command_inherit,
+  run_command_inherit_async,
   type Run_command_options,
 } from "./process.ts";
 import { register_compose_project } from "./registry.ts";
+import { has_configured_routing_hostname, resolve_routing } from "./routing.ts";
 import { create_runtime_env } from "./runtime-env.ts";
 import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
 
@@ -39,6 +58,7 @@ type Command_name =
   | "env"
   | "gc"
   | "help"
+  | "hosts"
   | "info"
   | "setup";
 
@@ -55,11 +75,12 @@ function print_help() {
   console.log("Usage: devtree <command>");
   console.log("");
   console.log("Commands:");
-  console.log("  doctor [--fix]          Check local prerequisites, portless, and tailscale");
+  console.log("  doctor [--fix]          Check local prerequisites, routing, and Tailscale");
   console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
   console.log("  info                    Print the current instance URLs and resource names");
+  console.log("  hosts                   Print hosts-file entries for this checkout");
   console.log("  setup                   Write env overrides, start dependencies, run hooks");
-  console.log("  dev [-- <vite args>]    Start the app through devtree and portless");
+  console.log("  dev [-- <vite args>]    Start the app through Devtree routing");
   console.log("  deps start|stop|logs    Manage configured dependencies");
   console.log("  gc [--dry-run] [-v]     Remove orphaned dependency resources");
   console.log("  env write|show          Compatibility aliases for env sync and info");
@@ -118,13 +139,13 @@ function run_process(
   return run_command_inherit(command, args, {
     cwd: options?.cwd,
     allow_failure: options?.allow_failure,
-      env: create_runtime_env(
-        runtime_state.instance,
-        runtime_state.effective_env_values,
-        runtime_state.tailscale,
-        options?.env,
-      ),
-    });
+    env: create_runtime_env(
+      runtime_state.instance,
+      runtime_state.effective_env_values,
+      runtime_state.tailscale,
+      options?.env,
+    ),
+  });
 }
 
 function get_runtime_state(loaded_config: Loaded_devtree_config) {
@@ -147,8 +168,8 @@ function print_tailscale_status(tailscale: Resolved_tailscale) {
     return;
   }
 
-  if (tailscale.mode === "portless-proxy" && tailscale.connected) {
-    console.log("[devtree] Tailscale connected (portless-proxy mode)");
+  if (is_proxy_tailscale_mode(tailscale.mode) && tailscale.connected) {
+    console.log("[devtree] Tailscale connected (proxy mode)");
     return;
   }
 
@@ -292,7 +313,9 @@ function run_hook(
 }
 
 function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix = true) {
-  if (loaded_config.config.portless?.enabled === false || process.env.PORTLESS === "0") {
+  const routing = resolve_routing(loaded_config.config);
+
+  if (routing.provider_kind !== "portless" || !routing.enabled) {
     return;
   }
 
@@ -302,7 +325,7 @@ function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix 
     );
   }
 
-  if (loaded_config.config.portless?.hostname) {
+  if (has_configured_routing_hostname(loaded_config.config)) {
     const help_result = run_command_capture("portless", ["run", "--help"], {
       allow_failure: true,
     });
@@ -334,6 +357,32 @@ function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix 
   run_command_capture("portless", get_portless_start_args(loaded_config), { allow_failure: true });
 }
 
+async function ensure_routing_ready(
+  loaded_config: Loaded_devtree_config,
+  should_fix = true,
+) {
+  const routing = resolve_routing(loaded_config.config);
+
+  if (!routing.enabled) {
+    return;
+  }
+
+  if (routing.provider_kind === "portless") {
+    ensure_portless_ready(loaded_config, should_fix);
+    return;
+  }
+
+  if (!routing.caddy_admin_url) {
+    throw new Error("Caddy routing requires a local admin URL.");
+  }
+
+  await ensure_caddy_process({
+    admin_url: routing.caddy_admin_url,
+    public_port: routing.port,
+    should_start: should_fix && routing.bootstrap !== "manual",
+  });
+}
+
 function resolve_require_from_root(repo_root: string) {
   return createRequire(resolve(repo_root, "package.json"));
 }
@@ -348,34 +397,14 @@ function get_dev_server_runner(loaded_config: Loaded_devtree_config): Dev_server
   throw new Error('dev_server.runner must be "vite-plus" or "vite".');
 }
 
-function get_proxy_mode_configuration_error(
-  loaded_config: Loaded_devtree_config,
-  instance?: Devtree_instance,
-) {
-  if (loaded_config.config.tailscale?.mode !== "portless-proxy") {
-    return null;
-  }
-
-  if (loaded_config.config.tailscale.enabled !== true) {
-    return 'tailscale.mode is "portless-proxy", but tailscale.enabled is not true';
-  }
-
-  if (!loaded_config.config.portless?.hostname) {
-    return 'tailscale.mode "portless-proxy" requires portless.hostname to resolve a canonical hostname';
-  }
-
-  if (instance && !instance.portless_enabled) {
-    return 'tailscale.mode "portless-proxy" requires Portless to be enabled';
-  }
-
-  return null;
-}
-
 function ensure_proxy_mode_configuration(
   loaded_config: Loaded_devtree_config,
   instance: Devtree_instance,
 ) {
-  const configuration_error = get_proxy_mode_configuration_error(loaded_config, instance);
+  const configuration_error = get_proxy_mode_configuration_error(
+    loaded_config.config,
+    instance,
+  );
 
   if (configuration_error) {
     throw new Error(configuration_error);
@@ -400,7 +429,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   }
 
   const proxy_configuration_error = get_proxy_mode_configuration_error(
-    loaded_config,
+    loaded_config.config,
     instance,
   );
 
@@ -420,31 +449,56 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
     issues.push(`dev server runner ${dev_server_command} is not available on PATH`);
   }
 
-  if (loaded_config.config.portless?.enabled === false || process.env.PORTLESS === "0") {
-    console.log("[skip] portless disabled");
-  } else if (!command_exists("portless")) {
-    issues.push("portless is not available on PATH");
-  } else {
-    try {
-      ensure_portless_ready(loaded_config, fix);
-      console.log(fix ? "[pass] portless ready (bootstrapped)" : "[pass] portless reachable");
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
+  if (instance) {
+    const routing = resolve_routing(loaded_config.config);
+
+    if (!routing.enabled) {
+      console.log(`[skip] ${routing.provider_kind} routing disabled`);
+    } else if (routing.provider_kind === "portless") {
+      if (!command_exists("portless")) {
+        issues.push("portless is not available on PATH");
+      } else {
+        try {
+          ensure_portless_ready(loaded_config, fix);
+          console.log(
+            fix ? "[pass] portless ready (bootstrapped)" : "[pass] portless reachable",
+          );
+        } catch (error) {
+          issues.push(error instanceof Error ? error.message : String(error));
+        }
+      }
+    } else if (!command_exists("caddy")) {
+      issues.push(
+        "caddy routing is configured, but `caddy` is not available on PATH. Install Caddy and run `pnpm devtree doctor --fix` again.",
+      );
+    } else if (!routing.caddy_admin_url) {
+      issues.push("caddy routing is configured without an admin URL");
+    } else {
+      try {
+        await ensure_routing_ready(loaded_config, fix);
+        console.log(
+          fix
+            ? `[pass] caddy ready at ${routing.caddy_admin_url} (bootstrapped)`
+            : `[pass] caddy ready at ${routing.caddy_admin_url}`,
+        );
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 
   if (!tailscale.enabled) {
     console.log("[skip] tailscale disabled");
-  } else if (tailscale.mode === "portless-proxy" && tailscale.connected) {
-    console.log("[pass] tailscale connected (portless-proxy mode)");
+  } else if (is_proxy_tailscale_mode(tailscale.mode) && tailscale.connected) {
+    console.log("[pass] tailscale connected (proxy mode)");
   } else if (tailscale.mode === "direct" && tailscale.host) {
     console.log(`[pass] tailscale host ${tailscale.host}`);
   } else {
     issues.push(tailscale.error ?? "tailscale is enabled, but is not connected");
   }
 
-  if (tailscale.mode === "portless-proxy") {
-    console.log("[pass] Vite host 127.0.0.1 (Portless proxy exposure)");
+  if (is_proxy_tailscale_mode(tailscale.mode)) {
+    console.log("[pass] Vite host 127.0.0.1 (proxy mode)");
 
     if (instance) {
       try {
@@ -454,7 +508,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
         );
       } catch {
         issues.push(
-          `canonical hostname ${instance.public_hostname} does not resolve. Configure tailnet DNS before remote access; Devtree will not modify DNS.`,
+          `public hostname ${instance.public_hostname} does not resolve on this machine. Configure DNS or add the local entry printed by \`pnpm devtree hosts\`; Devtree will not modify DNS or hosts files.`,
         );
       }
     }
@@ -521,6 +575,8 @@ function print_info(runtime_state: Runtime_state) {
   console.log(`Scoped name: ${runtime_state.instance.scoped_name}`);
   console.log(`Worktree path: ${runtime_state.instance.worktree_path}`);
   console.log(`Worktree slug: ${runtime_state.instance.worktree_slug ?? "main checkout"}`);
+  console.log(`Routing provider: ${runtime_state.instance.routing_provider}`);
+  console.log(`Routing enabled: ${runtime_state.instance.routing_enabled ? "yes" : "no"}`);
   console.log(`Portless enabled: ${runtime_state.instance.portless_enabled ? "yes" : "no"}`);
   console.log(`Tailscale mode: ${runtime_state.tailscale.mode}`);
   console.log(`Env provider: ${runtime_state.loaded_config.config.env.provider}`);
@@ -576,6 +632,30 @@ async function main() {
     return;
   }
 
+  if (command_name === "hosts") {
+    const instance = create_devtree_instance(loaded_config);
+
+    if (is_localhost_hostname(instance.public_hostname)) {
+      console.log(
+        `${instance.public_hostname} is a local-only hostname and does not need a hosts-file entry.`,
+      );
+      console.log(
+        "Configure routing.hostname with a custom domain before sharing the application with another machine.",
+      );
+      return;
+    }
+
+    console.log(format_local_hosts_section(instance.public_hostname));
+    console.log("");
+    console.log(
+      format_tailscale_hosts_section(
+        instance.public_hostname,
+        resolve_tailscale_ipv4(),
+      ),
+    );
+    return;
+  }
+
   const runtime_state = get_runtime_state(loaded_config);
 
   if (command_name === "info") {
@@ -612,7 +692,7 @@ async function main() {
 
   if (command_name === "setup") {
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
-    ensure_portless_ready(loaded_config);
+    await ensure_routing_ready(loaded_config);
     print_tailscale_status(runtime_state.tailscale);
 
     for (const dependency of loaded_config.config.dependencies ?? []) {
@@ -665,44 +745,97 @@ async function main() {
 
   if (command_name === "dev") {
     const extra_args = argv.slice(1);
+    const routing = resolve_routing(loaded_config.config);
 
-    if (!runtime_state.instance.portless_enabled && !process.env.BETTER_AUTH_URL) {
+    if (
+      routing.provider_kind === "portless" &&
+      !runtime_state.instance.portless_enabled &&
+      !process.env.BETTER_AUTH_URL
+    ) {
       console.warn(
         "PORTLESS=0 disables the injected public URL. Set BETTER_AUTH_URL before signing in.",
       );
     }
 
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
-    ensure_portless_ready(loaded_config);
+    await ensure_routing_ready(loaded_config);
     print_tailscale_status(runtime_state.tailscale);
     run_hook(runtime_state, "pre_dev");
 
+    const vite_port =
+      routing.provider_kind === "caddy"
+        ? runtime_state.instance.allocate_port("vite", 5173)
+        : undefined;
+    const caddy_route_id =
+      routing.provider_kind === "caddy"
+        ? get_caddy_route_id(runtime_state.instance.instance_id)
+        : null;
     const development_command = build_development_command({
       app_name: runtime_state.instance.app_name,
       public_hostname: runtime_state.instance.public_hostname,
-      portless_exact_hostname: Boolean(loaded_config.config.portless?.hostname),
+      portless_exact_hostname: has_configured_routing_hostname(loaded_config.config),
       extra_args,
       portless_enabled: runtime_state.instance.portless_enabled,
+      routing_provider: routing.provider_kind,
       runner: get_dev_server_runner(loaded_config),
       vite_host:
-        runtime_state.tailscale.mode === "direct" && runtime_state.tailscale.host
+        routing.provider_kind === "portless" &&
+        runtime_state.tailscale.mode === "direct" &&
+        runtime_state.tailscale.host
           ? "0.0.0.0"
           : "127.0.0.1",
+      vite_port,
       use_varlock: loaded_config.config.env.provider === "varlock",
     });
     const [command, ...args] = development_command;
 
-    run_command_inherit(command, args, {
-      env: create_runtime_env(
+    if (
+      routing.provider_kind === "caddy" &&
+      routing.caddy_admin_url &&
+      vite_port !== undefined &&
+      caddy_route_id
+    ) {
+      await register_caddy_route(
+        routing.caddy_admin_url,
+        create_caddy_route({
+          route_id: caddy_route_id,
+          hostname: runtime_state.instance.public_hostname,
+          upstream_port: vite_port,
+        }),
+      );
+      console.log(
+        `[devtree] Caddy route ${runtime_state.instance.public_hostname} -> 127.0.0.1:${vite_port}`,
+      );
+    }
+
+    let exit_status = 0;
+
+    try {
+      const runtime_env = create_runtime_env(
         runtime_state.instance,
         runtime_state.effective_env_values,
         runtime_state.tailscale,
-        {
-          PORTLESS_PORT: String(resolve_portless_port(loaded_config.config)),
-          PORTLESS_HTTPS: resolve_portless_https(loaded_config.config) ? "1" : "0",
-        },
-      ),
-    });
+        routing.provider_kind === "portless"
+          ? {
+              PORTLESS_PORT: String(routing.port),
+              PORTLESS_HTTPS: routing.https ? "1" : "0",
+            }
+          : undefined,
+      );
+
+      exit_status =
+        routing.provider_kind === "caddy"
+          ? await run_command_inherit_async(command, args, { env: runtime_env })
+          : run_command_inherit(command, args, { env: runtime_env });
+    } finally {
+      if (routing.provider_kind === "caddy" && routing.caddy_admin_url && caddy_route_id) {
+        await remove_caddy_route(routing.caddy_admin_url, caddy_route_id);
+      }
+    }
+
+    if (exit_status !== 0) {
+      process.exitCode = exit_status;
+    }
     return;
   }
 

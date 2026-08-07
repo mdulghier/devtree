@@ -1,0 +1,139 @@
+:root {
+  color: #f5eee5;
+  background: #171513;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at 85% 10%, rgb(230 111 72 / 20%) 0, transparent 28rem),
+    radial-gradient(circle at 12% 90%, rgb(87 112 194 / 18%) 0, transparent 30rem),
+    #171513;
+}
+
+.card {
+  width: min(100%, 52rem);
+  padding: clamp(2rem, 6vw, 4.75rem);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 1.5rem;
+  background: rgb(35 31 28 / 88%);
+  box-shadow: 0 2rem 7rem rgb(0 0 0 / 35%);
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: #e4a27d;
+  font-size: 0.78rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.eyebrow span {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  background: #ef7f56;
+  box-shadow: 0 0 0 0.3rem rgb(239 127 86 / 17%);
+}
+
+h1 {
+  max-width: 12ch;
+  margin: 1.2rem 0;
+  font-size: clamp(2.6rem, 7vw, 5.2rem);
+  line-height: 0.96;
+  letter-spacing: -0.055em;
+}
+
+.intro {
+  max-width: 42rem;
+  margin: 0 0 2rem;
+  color: #bdb2a8;
+  font-size: 1.08rem;
+  line-height: 1.65;
+}
+
+.hostname {
+  margin: 0 0 1.8rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid rgb(239 127 86 / 30%);
+  border-radius: 0.8rem;
+  color: #ffc9ab;
+  background: rgb(239 127 86 / 8%);
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(0.84rem, 2vw, 1rem);
+}
+
+dl {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+}
+
+dl div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.3fr) minmax(0, 1fr);
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 5%);
+}
+
+dt {
+  color: #9b8f85;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86rem;
+}
+
+a {
+  color: #f5ae86;
+}
+
+.footnote {
+  margin: 1.8rem 0 0;
+  color: #9b8f85;
+  font-size: 0.85rem;
+}
+
+code {
+  color: #ffc3a1;
+}
+
+@media (max-width: 40rem) {
+  body {
+    padding: 1rem;
+  }
+
+  .card {
+    padding: 2rem 1.4rem;
+  }
+
+  dl div {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}
