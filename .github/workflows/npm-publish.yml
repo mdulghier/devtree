@@ -161,8 +161,6 @@ jobs:
 
       - name: Publish to npm
         run: npm publish ./*.tgz --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-preview:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_preview
@@ -186,5 +184,3 @@ jobs:
 
       - name: Publish preview to npm
         run: npm publish ./*.tgz --provenance --access public --tag preview
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
