@@ -8,7 +8,7 @@ description: >
   local development without URL, env, or Docker naming collisions.
 type: core
 library: devtree
-library_version: "0.1.0"
+library_version: "0.3.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/config.ts"
@@ -82,6 +82,14 @@ pnpm devtree doctor --fix
 pnpm devtree setup
 ```
 
+For guided Caddy and Tailscale proxy configuration, use the interactive setup instead:
+
+```bash
+pnpm devtree setup --interactive
+```
+
+It writes shared settings to committed `.devtree.yml` and the machine namespace to ignored `.devtree.local.yml`. Plain `setup` remains non-interactive.
+
 ## Core Patterns
 
 ### Keep env values instance-derived
@@ -107,7 +115,29 @@ export default define_devtree_config({
 
 Use `instance.public_url`, `instance.get_scoped_name()` and `instance.allocate_port()` instead of fixed local values.
 
-For one canonical hostname that is also reachable through a shared Tailscale-to-Portless proxy, configure `portless.hostname` as a callback, set `tailscale.mode` to `'portless-proxy'`, and keep developer namespace/domain values in machine environment variables. The callback receives `{ app_name, worktree_slug }`; flatten worktree routes as `${worktree_slug}--${app_name}`. Validate required environment variables before returning the complete hostname.
+For one canonical hostname that is reachable across a tailnet, prefer the interactive setup. Its shared configuration is declarative:
+
+```yaml
+# .devtree.yml
+version: 1
+routing:
+  provider: caddy
+  base_domain: dev.example.com
+  port: 1355
+  https: false
+tailscale:
+  enabled: true
+  mode: proxy
+```
+
+```yaml
+# .devtree.local.yml
+version: 1
+routing:
+  machine_name: alice
+```
+
+This produces worktree-aware hostnames such as `my-app.alice.dev.example.com` and `feature-123--my-app.alice.dev.example.com` without machine environment variables. The local file overrides the shared file and is reused by linked worktrees. `routing.hostname_suffix` supports a custom complete wildcard suffix, while the TypeScript `routing.hostname` callback remains the advanced escape hatch.
 
 ### Start Docker dependencies through config
 

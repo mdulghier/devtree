@@ -1,37 +1,7 @@
 import { define_devtree_config } from "devtree";
 
-function required_env(name: string) {
-  const value = process.env[name]?.trim();
-
-  if (!value) {
-    throw new Error(`${name} is required. See examples/caddy-hosts/README.md for setup.`);
-  }
-
-  return value;
-}
-
 export default define_devtree_config({
   app_name: "caddy-demo",
-
-  routing: {
-    provider: {
-      kind: "caddy",
-    },
-    hostname: ({ app_name, worktree_slug }) => {
-      const developer_namespace = required_env("DEVTREE_DEVELOPER_NAMESPACE");
-      const public_domain = required_env("DEVTREE_PUBLIC_DOMAIN");
-      const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
-
-      return `${route_name}.${developer_namespace}.${public_domain}`;
-    },
-    port: 1357,
-    https: false,
-  },
-
-  tailscale: {
-    enabled: true,
-    mode: "proxy",
-  },
 
   dev_server: {
     runner: "vite",

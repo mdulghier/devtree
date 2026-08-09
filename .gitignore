@@ -4,6 +4,7 @@ coverage/
 .DS_Store
 .env
 .env.*
+.devtree.local.yml
 *.log
 *.tsbuildinfo
 .vite/

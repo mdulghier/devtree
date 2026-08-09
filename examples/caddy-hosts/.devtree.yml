@@ -1,0 +1,9 @@
+version: 1
+routing:
+  provider: caddy
+  base_domain: devtree.test
+  port: 1355
+  https: false
+tailscale:
+  enabled: true
+  mode: proxy

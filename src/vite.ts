@@ -59,7 +59,9 @@ function create_core_devtree_plugin(): Plugin {
       }
 
       if (process.env.DEVTREE_ACTIVE === "1") {
-        console.log(`[devtree] URL ${process.env.DEVTREE_PUBLIC_URL ?? "unknown"}`);
+        console.log(
+          `[devtree] URL ${process.env.DEVTREE_TAILSCALE_URL ?? process.env.DEVTREE_PUBLIC_URL ?? "unknown"}`,
+        );
         console.log(`[devtree] Instance ${process.env.DEVTREE_INSTANCE_ID ?? "unknown"}`);
         return;
       }

@@ -45,9 +45,9 @@ describe("proxy mode doctor configuration", () => {
     );
   });
 
-  test("rejects legacy direct exposure with Caddy routing", () => {
+  test("rejects explicitly configured direct exposure with Caddy routing", () => {
     const config = create_config();
-    config.tailscale = { enabled: true };
+    config.tailscale = { enabled: true, mode: "direct" };
 
     expect(get_proxy_mode_configuration_error(config)).toContain(
       'tailscale.mode to be "proxy"',

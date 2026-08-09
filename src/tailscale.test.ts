@@ -5,6 +5,9 @@ import {
   get_tailscale_mode,
   parse_tailscale_connection,
   parse_tailscale_host,
+  parse_tailscale_ipv4,
+  parse_tailscale_node_id,
+  resolve_tailscale,
 } from "./tailscale.ts";
 
 describe("parse_tailscale_host", () => {
@@ -24,6 +27,16 @@ describe("parse_tailscale_host", () => {
     ).toBe(true);
   });
 
+  test("reads the node identity and IPv4 address from status", () => {
+    const status_json = JSON.stringify({
+      TailscaleIPs: ["100.101.102.103", "fd7a:115c:a1e0::1"],
+      Self: { ID: "node-123" },
+    });
+
+    expect(parse_tailscale_ipv4(status_json)).toBe("100.101.102.103");
+    expect(parse_tailscale_node_id(status_json)).toBe("node-123");
+  });
+
   test("keeps enabled configurations in legacy direct mode by default", () => {
     const config: Devtree_config = {
       app_name: "demo",
@@ -32,6 +45,17 @@ describe("parse_tailscale_host", () => {
     };
 
     expect(get_tailscale_mode(config)).toBe("direct");
+  });
+
+  test("infers proxy mode when Tailscale is enabled with Caddy", () => {
+    const config: Devtree_config = {
+      app_name: "demo",
+      routing: { provider: { kind: "caddy" } },
+      tailscale: { enabled: true },
+      env: { provider: "dotenv", entries: () => [] },
+    };
+
+    expect(get_tailscale_mode(config)).toBe("proxy");
   });
 
   test("resolves the explicit Portless proxy mode", () => {
@@ -52,5 +76,69 @@ describe("parse_tailscale_host", () => {
     };
 
     expect(get_tailscale_mode(config)).toBe("proxy");
+  });
+
+  test("does not execute commands when Tailscale is disabled", () => {
+    const commands: string[] = [];
+    const config: Devtree_config = {
+      app_name: "demo",
+      env: { provider: "dotenv", entries: () => [] },
+    };
+
+    const resolved_tailscale = resolve_tailscale(config, {
+      command_exists: (command) => {
+        commands.push(command);
+        return true;
+      },
+      run_command_capture: (command, args) => {
+        commands.push([command, ...args].join(" "));
+        return { status: 0, stdout: "{}", stderr: "" };
+      },
+    });
+
+    expect(resolved_tailscale.mode).toBe("disabled");
+    expect(commands).toEqual([]);
+  });
+
+  test("reports a missing Tailscale CLI actionably", () => {
+    const config: Devtree_config = {
+      app_name: "demo",
+      tailscale: { enabled: true, mode: "proxy" },
+      env: { provider: "dotenv", entries: () => [] },
+    };
+
+    expect(
+      resolve_tailscale(config, {
+        command_exists: () => false,
+        run_command_capture: () => ({ status: 1, stdout: "", stderr: "" }),
+      }),
+    ).toMatchObject({
+      cli_available: false,
+      connected: false,
+      error: expect.stringContaining("not available on PATH"),
+    });
+  });
+
+  test("reports a disconnected tailnet actionably", () => {
+    const config: Devtree_config = {
+      app_name: "demo",
+      tailscale: { enabled: true, mode: "proxy" },
+      env: { provider: "dotenv", entries: () => [] },
+    };
+
+    expect(
+      resolve_tailscale(config, {
+        command_exists: () => true,
+        run_command_capture: () => ({
+          status: 0,
+          stdout: JSON.stringify({ BackendState: "Stopped", Self: { Online: false } }),
+          stderr: "",
+        }),
+      }),
+    ).toMatchObject({
+      cli_available: true,
+      connected: false,
+      error: expect.stringContaining("not connected"),
+    });
   });
 });

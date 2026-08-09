@@ -7,7 +7,7 @@ description: >
   the worktree URL, and cleaned up correctly after worktrees are deleted.
 type: core
 library: devtree
-library_version: "0.1.0"
+library_version: "0.3.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/cli.ts"
@@ -29,6 +29,8 @@ pnpm devtree doctor --fix
 pnpm devtree setup
 pnpm devtree dev
 ```
+
+Use `pnpm devtree setup --interactive` once when the repository needs guided Caddy and Tailscale proxy configuration. It writes `.devtree.yml` and ignored `.devtree.local.yml`; ordinary `setup` stays non-interactive.
 
 Then inspect the assigned URL and names.
 
@@ -68,9 +70,16 @@ pnpm devtree dev
 pnpm devtree info
 ```
 
-`info` prints the public URL and hostname, Portless state, Tailscale mode, app name, instance ID, scoped name, worktree identity, env provider, env file, and Compose project names.
+`info` prints the exact local and Tailscale application URLs, required hostname and port, active Serve mapping, routing provider, app name, instance ID, scoped name, worktree identity, env provider, env file, and Compose project names. Persisted routing state keeps this output stable in a fresh shell.
 
-In `portless-proxy` mode, `doctor` also checks that the canonical hostname resolves, Tailscale is connected, Portless supports exact hostname registration, and Vite remains on `127.0.0.1`. DNS, tailnet policy, and the shared Tailscale TCP forward remain infrastructure responsibilities.
+In Tailscale proxy mode, `doctor` checks Caddy, hostname resolution, Tailscale connectivity, and the shared raw TCP Serve mapping. `doctor --fix`, `setup`, and `dev` reconcile that mapping idempotently without resetting or changing unrelated Serve routes. Vite remains on `127.0.0.1`.
+
+Inspect or explicitly remove only the Devtree-owned mapping with:
+
+```bash
+pnpm devtree tailscale status
+pnpm devtree tailscale remove
+```
 
 ### Clean up orphaned Docker resources safely
 

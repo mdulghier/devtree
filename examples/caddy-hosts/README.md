@@ -61,44 +61,31 @@ pnpm install
 pnpm build
 ```
 
-### 2. Choose this machine's hostname values
-
-Set these values in every terminal where you run Devtree:
-
-```bash
-export DEVTREE_DEVELOPER_NAMESPACE=alice
-export DEVTREE_PUBLIC_DOMAIN=devtree.test
-```
-
-Replace `alice` with a short name that is unique to you or this development
-machine. Keep `devtree.test` for this example, or choose another private
-development domain used by your team.
-
-Together, these values put `alice.devtree.test` at the end of every hostname
-created on this machine. They stay in your machine environment rather than the
-shared project configuration because another developer will use a different name.
-
-Add the exports to your shell profile if you want them available in new terminals.
-
-### 3. Forward the shared port through Tailscale
-
-Run this once on the development machine:
-
-```bash
-tailscale serve --tcp=1355 tcp://localhost:1355
-```
-
-This exposes Caddy's shared port to authorized machines on the Tailscale network.
-You do not need another forwarding rule when you create a worktree.
-
-### 4. Install the example
+### 2. Install the example
 
 ```bash
 cd examples/caddy-hosts
 pnpm install
 ```
 
-### 5. Print the hosts file entries
+### 3. Run interactive setup
+
+```bash
+pnpm devtree setup --interactive
+```
+
+Accept `devtree.test` as the shared domain and choose a short machine namespace,
+such as `alice`. Devtree writes the committed settings to `.devtree.yml` and the
+machine namespace to the ignored `.devtree.local.yml`. No shell exports are
+required.
+
+Because this example uses hosts files instead of wildcard DNS, type `later` when
+the wizard asks whether to continue with verification.
+
+Devtree manages the shared Tailscale mapping itself. It reuses the same mapping
+for every worktree and preserves unrelated Serve routes.
+
+### 4. Print the hosts file entries
 
 ```bash
 pnpm devtree hosts
@@ -135,18 +122,16 @@ sudo nano /etc/hosts
 Devtree prints the entries but does not request administrator access or edit the
 file for you.
 
-### 6. Check and prepare the checkout
+### 5. Check and prepare the checkout
 
 After adding the hosts file entries, run:
 
 ```bash
-pnpm devtree doctor --fix
 pnpm devtree setup
 ```
 
-The first command checks Caddy, Tailscale, hostname resolution, Docker, and the local
-Vite network settings. It starts the shared Caddy process when needed. The second
-writes this checkout's URL and dependency ports to `.env.local`, then starts
+The command verifies Caddy, Tailscale, and hostname resolution, reconciles the shared
+mapping, writes this checkout's URL and dependency ports to `.env.local`, and starts
 PostgreSQL and Redis through Docker Compose.
 
 Devtree gives the checkout its own Compose project, containers, network, database
@@ -166,7 +151,7 @@ REDIS_URL=redis://127.0.0.1:6712
 You can keep your own settings outside the Devtree-managed section. Devtree updates
 its section during setup and leaves the rest of the file alone.
 
-### 7. Start Vite
+### 6. Start Vite
 
 ```bash
 pnpm devtree dev
@@ -185,8 +170,8 @@ instead of being exposed to browser code.
 
 ## Run a second checkout at the same time
 
-Open another terminal at the root of the original Devtree repository. Make sure
-the two `DEVTREE_` exports are available in this terminal, then run:
+Open another terminal at the root of the original Devtree repository. The linked
+worktree automatically reuses the primary worktree's `.devtree.local.yml`:
 
 ```bash
 git worktree add ../devtree-caddy-example -b caddy-worktree
@@ -235,6 +220,9 @@ Run these from `examples/caddy-hosts` in the checkout you want to inspect:
 # Show the URL, hostname, routing provider, and checkout identity
 pnpm devtree info
 
+# Inspect the live shared Serve mapping and its ownership
+pnpm devtree tailscale status
+
 # Print the exact local and remote hosts file entries
 pnpm devtree hosts
 
@@ -244,6 +232,10 @@ pnpm devtree doctor
 # Stop this checkout's PostgreSQL and Redis containers
 pnpm devtree deps stop
 ```
+
+When the entire example no longer needs its shared mapping, remove only the
+Devtree-owned TCP port with `pnpm devtree tailscale remove`. Devtree refuses if it
+cannot prove ownership and never resets or removes unrelated Serve routes.
 
 Stop the development server with `Ctrl+C`.
 
@@ -263,7 +255,9 @@ git worktree remove ../devtree-caddy-example
 
 ## Files worth reading
 
-- `devtree.config.ts` defines the Caddy provider and complete hostname.
+- `.devtree.yml` defines the shared Caddy and Tailscale policy.
+- `.devtree.local.yml` stores the ignored machine namespace created by setup.
+- `devtree.config.ts` defines application environment values and dependencies.
 - `docker-compose.yml` defines the PostgreSQL and Redis services.
 - `vite.config.ts` adds the Devtree Vite plugin.
 - `src/main.ts` displays the values received by the application.

@@ -3,6 +3,11 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { Devtree_instance } from "./instance.ts";
+import {
+  apply_devtree_yaml_config,
+  load_devtree_yaml_config,
+  type Loaded_devtree_yaml_config,
+} from "./yaml-config.ts";
 
 export type Managed_env_entry =
   | {
@@ -84,6 +89,7 @@ export type Devtree_config = {
   tailscale?: {
     enabled?: boolean;
     mode?: Tailscale_mode;
+    serve_port?: number;
   };
   portless?: {
     enabled?: boolean;
@@ -119,6 +125,7 @@ export type Loaded_devtree_config = {
   config: Devtree_config;
   config_path: string;
   repo_root: string;
+  yaml_config?: Loaded_devtree_yaml_config;
 };
 
 export function define_devtree_config(config: Devtree_config) {
@@ -157,9 +164,12 @@ export async function load_devtree_config(
     throw new Error(`Expected a default export from ${config_path}.`);
   }
 
+  const yaml_config = load_devtree_yaml_config(repo_root);
+
   return {
-    config: imported_config.default,
+    config: apply_devtree_yaml_config(imported_config.default, yaml_config.merged),
     config_path,
     repo_root,
+    yaml_config,
   };
 }

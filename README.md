@@ -198,9 +198,7 @@ Both checkouts can run at the same time.
 
 The default `.localhost` URLs only work on the development machine. Switch to Caddy when teammates, test devices, or other computers on your Tailscale network need to open the application.
 
-Existing projects with `tailscale.enabled: true` and no `mode` keep their original direct-access behavior. The setup below opts into the shared proxy with `mode: "proxy"`.
-
-The upgraded setup keeps Vite available only on the development machine. Caddy receives browser requests on port `1355` and sends each hostname to the correct Vite process.
+The interactive setup keeps machine-specific values in `.devtree.local.yml`; no shell environment variables or repository wrapper scripts are required. Vite remains available only on the development machine. Caddy receives requests on one shared port and sends each hostname to the correct worktree.
 
 ```text
 Browser on this machine or another Tailscale machine
@@ -210,11 +208,11 @@ Caddy on port 1355
 The Vite process for the requested hostname
 ```
 
-There is one Caddy process and one Tailscale forwarding rule per developer machine. Starting another worktree only adds another Caddy route.
+There is one Caddy process and one Tailscale forwarding rule per developer machine. Devtree manages that shared forwarding rule. Starting another worktree only adds another Caddy route.
 
-### 1. Install Caddy and Tailscale
+### Interactive setup
 
-On macOS, install Caddy with:
+Install Caddy and Tailscale first. On macOS:
 
 ```bash
 brew install caddy
@@ -222,157 +220,66 @@ brew install caddy
 
 Install Tailscale, sign in, and make sure the machine is connected to the correct Tailscale network.
 
-### 2. Set the developer name and public domain
-
-Keep machine-specific values out of the project configuration:
-
-```bash
-export DEVTREE_DEVELOPER_NAMESPACE=alice
-export DEVTREE_PUBLIC_DOMAIN=dev.example.com
-```
-
-`DEVTREE_DEVELOPER_NAMESPACE` identifies the developer or development machine. Replace `alice` with a short value that is unique within the team. This keeps two developers from claiming the same application hostname.
-
-`DEVTREE_PUBLIC_DOMAIN` is the shared development domain chosen by the team. Replace `dev.example.com` with a domain your team controls when using DNS. If you use hosts files instead, it can be a private name that every participating machine maps explicitly. It does not need to be open to the public internet.
-
-Together with `app_name: "web-ui"`, these values produce a hostname such as:
-
-```text
-web-ui.alice.dev.example.com
-```
-
-Keep these values in the machine environment because each developer uses a different name while the project configuration stays the same. Add them to your shell profile so they are available in every checkout.
-
-### 3. Update `devtree.config.ts`
-
-Move the hostname and shared port into `routing` and select Caddy:
-
-```ts
-import { define_devtree_config } from "devtree";
-
-function required_env(name: string) {
-  const value = process.env[name]?.trim();
-
-  if (!value) {
-    throw new Error(`${name} is required for the Devtree public hostname`);
-  }
-
-  return value;
-}
-
-export default define_devtree_config({
-  app_name: "web-ui",
-
-  routing: {
-    provider: {
-      kind: "caddy",
-    },
-    hostname: ({ app_name, worktree_slug }) => {
-      const developer_namespace = required_env("DEVTREE_DEVELOPER_NAMESPACE");
-      const public_domain = required_env("DEVTREE_PUBLIC_DOMAIN");
-      const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
-
-      return `${route_name}.${developer_namespace}.${public_domain}`;
-    },
-    port: 1355,
-    https: false,
-  },
-
-  tailscale: {
-    enabled: true,
-    mode: "proxy",
-  },
-
-  dev_server: {
-    runner: "vite",
-  },
-
-  env: {
-    provider: "dotenv",
-    entries: ({ instance }) => [
-      {
-        kind: "value",
-        key: "APP_URL",
-        value: instance.public_url,
-      },
-    ],
-  },
-});
-```
-
-The hostname function returns the complete hostname that Devtree uses for Caddy, application URLs, Vite, environment values, and command output.
-
-### 4. Configure DNS or hosts files
-
-DNS is the easiest option when developers create worktrees regularly. Ask your DNS administrator to add a wildcard record for the developer name. It should point to the development machine's Tailscale IP:
-
-```text
-*.alice.dev.example.com → Alice's development machine's Tailscale IP
-```
-
-This one record covers the main checkout and its worktrees.
-
-For a small setup, you can use hosts files instead of DNS. Devtree can print the exact entries for the current checkout or worktree:
-
-```bash
-pnpm devtree hosts
-```
-
-For the main checkout, the output looks like this:
-
-```text
-Add to the hosts file on this development machine:
-127.0.0.1 web-ui.alice.dev.example.com
-
-Add to the hosts file on other Tailscale machines:
-100.101.102.103 web-ui.alice.dev.example.com
-```
-
-Run the same command from a worktree to get its exact hostname:
-
-```text
-Add to the hosts file on this development machine:
-127.0.0.1 feature-123--web-ui.alice.dev.example.com
-
-Add to the hosts file on other Tailscale machines:
-100.101.102.103 feature-123--web-ui.alice.dev.example.com
-```
-
-Devtree gets the second address from `tailscale ip -4`, so you do not need to find or type it yourself. Copy the local entry to the development machine and the Tailscale entry to every other machine that should open the application.
-
-The hosts file is `/etc/hosts` on macOS and Linux, and `C:\Windows\System32\drivers\etc\hosts` on Windows. Editing it normally requires administrator access.
-
-Hosts files do not support wildcard entries. Add a new line on every participating machine whenever you create a worktree with a new hostname. This is practical for testing or a small number of stable worktrees; use wildcard DNS when that manual upkeep becomes inconvenient.
-
-The `hosts` command only prints entries. Devtree checks hostname resolution but does not request administrator access or change DNS, hosts files, or Tailscale permissions.
-
-### 5. Forward the shared port through Tailscale
-
-Run this once on the development machine:
-
-```bash
-tailscale serve --tcp=1355 tcp://localhost:1355
-```
-
-Do not create a forwarding rule for each worktree.
-
-### 6. Check and start the new setup
-
-Portless and Caddy cannot listen on port `1355` at the same time. If this project previously used the default Portless setup, stop its shared proxy once:
-
-```bash
-portless proxy stop -p 1355
-```
-
 Run:
 
 ```bash
-pnpm devtree doctor --fix
+pnpm devtree setup --interactive
+```
+
+The wizard detects the Tailscale machine name and address, asks for the shared development domain and port, previews the resulting wildcard DNS record, and asks for confirmation before writing anything. It creates:
+
+```yaml
+# .devtree.yml — commit this file
+version: 1
+routing:
+  provider: caddy
+  base_domain: dev.example.com
+  port: 1355
+  https: false
+tailscale:
+  enabled: true
+  mode: proxy
+```
+
+```yaml
+# .devtree.local.yml — machine-specific and ignored by Git
+version: 1
+routing:
+  machine_name: alice
+```
+
+Devtree adds the local file to the repository's Git exclude file. Linked worktrees reuse the primary worktree's `.devtree.local.yml` unless they deliberately contain their own override.
+
+The wizard prints the exact wildcard record to create:
+
+```text
+*.alice.dev.example.com → 100.101.102.103
+```
+
+Configure that record and press Enter to let the wizard verify DNS and finish normal project setup. Type `later` to save the files without waiting; after DNS is ready, run:
+
+```bash
 pnpm devtree setup
+```
+
+Then start the application:
+
+```bash
 pnpm devtree dev
 ```
 
-`doctor --fix` checks Caddy, Tailscale, hostname resolution, the required environment values, and the Vite network settings. It starts the Caddy process used by Devtree when necessary.
+Portless and Caddy cannot listen on the same port. If Portless is already using `1355`, the setup reports the conflict actionably; stop that listener or select another port in the wizard.
+
+After startup, Devtree prints the exact application URL prominently. This is the URL to open; the machine-level TCP target alone is not sufficient because Caddy also needs the application hostname in the HTTP `Host` header:
+
+```text
+[devtree] Tailscale Serve tcp:1355 -> localhost:1355
+[devtree] Tailscale application URL http://web-ui.alice.dev.example.com:1355
+
+Open http://web-ui.alice.dev.example.com:1355
+Tailscale hostname: web-ui.alice.dev.example.com
+Tailscale port: 1355
+```
 
 The main checkout is now available at:
 
@@ -388,7 +295,86 @@ http://feature-123--web-ui.alice.dev.example.com:1355
 
 These exact URLs work on the development machine and from other allowed machines on the Tailscale network.
 
+Discover the same URL later, including from a fresh shell, with:
+
+```bash
+pnpm devtree info
+```
+
+The output includes `Local URL`, `Tailscale application URL`, `Tailscale application hostname`, `Tailscale application port`, and the active Serve mapping. Devtree persists this resolved routing state under `~/.devtree/routing-state.json`; consumers should use the CLI rather than reading that implementation file directly.
+
 Devtree converts uppercase letters, slashes, punctuation, and long branch names into safe hostname labels. It adds a short, stable suffix when two converted names could otherwise be the same.
+
+### Non-interactive configuration
+
+Automation and developers who prefer declarative setup can create `.devtree.yml` and `.devtree.local.yml` directly using the schemas above, then run ordinary `devtree setup` or `devtree dev`. The local file wins when both files define the same supported value. Existing `routing.hostname` callbacks remain supported as the advanced escape hatch.
+
+`routing.hostname_suffix` can replace `base_domain` plus `machine_name` when the complete wildcard suffix does not follow Devtree's standard naming pattern:
+
+```yaml
+routing:
+  hostname_suffix: apps.alice.internal.example
+```
+
+No `sslip.io` dependency is required. It can still be used explicitly by setting a compatible `hostname_suffix` yourself.
+
+For a small setup without wildcard DNS, `pnpm devtree hosts` prints the exact local and tailnet hosts-file entries. Hosts files require one entry per worktree; DNS is preferable when worktrees are created frequently.
+
+### Multiple worktrees share the proxy
+
+For example, start the main checkout and a feature worktree in separate terminals:
+
+```bash
+# Main checkout
+pnpm devtree dev
+
+# ../web-ui-feature-123
+pnpm devtree setup
+pnpm devtree dev
+```
+
+With the YAML configuration above, they are available concurrently at:
+
+```text
+http://web-ui.alice.dev.example.com:1355
+http://feature-123--web-ui.alice.dev.example.com:1355
+```
+
+Both use one Caddy listener and one Tailscale TCP mapping. Stopping either development process removes only that worktree's Caddy route; it does not remove the shared Tailscale mapping.
+
+### Inspect or remove the owned mapping
+
+Inspect the desired mapping, live Serve route, ownership, and number of recorded worktrees with:
+
+```bash
+pnpm devtree tailscale status
+```
+
+When the shared mapping is no longer wanted, remove it explicitly with:
+
+```bash
+pnpm devtree tailscale remove
+```
+
+Removal uses `tailscale serve --tcp=<port> --yes off`, affecting only the configured TCP port. Devtree permits removal only when its persisted ownership record and the live mapping agree exactly. If the matching route existed before Devtree first saw it, Devtree treats it as external and refuses to remove it. Conflicting mappings are also left untouched with an error explaining how to choose another `tailscale.serve_port` or resolve the conflict manually.
+
+### Migrate away from a custom wrapper
+
+Suppose a repository currently starts development through a wrapper like this:
+
+```bash
+TAILSCALE_IP=$(tailscale ip -4)
+tailscale serve --tcp="$CADDY_PORT" --bg --yes "tcp://localhost:$CADDY_PORT"
+DEVTREE_PUBLIC_HOSTNAME="web-ui.$TAILSCALE_IP.sslip.io" pnpm devtree dev
+```
+
+Delete that wrapper and run the interactive setup:
+
+```bash
+pnpm devtree setup --interactive
+```
+
+Commit `.devtree.yml`, leave `.devtree.local.yml` uncommitted, and use `pnpm devtree dev`. Devtree now discovers the Tailscale IPv4 address, validates the application hostname, owns the Serve lifecycle, persists the resolved URL, and prints it during startup and through `devtree info`.
 
 ## Add Docker services for each worktree
 

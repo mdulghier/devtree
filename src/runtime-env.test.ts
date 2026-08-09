@@ -31,6 +31,8 @@ function create_tailscale(mode: Resolved_tailscale["mode"]): Resolved_tailscale 
     cli_available: mode !== "disabled",
     connected: mode !== "disabled",
     host: mode === "disabled" ? null : "devbox.example.ts.net",
+    ipv4: mode === "disabled" ? null : "100.101.102.103",
+    node_id: mode === "disabled" ? null : "node-123",
     error: null,
   };
 }
@@ -59,5 +61,30 @@ describe("create_runtime_env", () => {
     );
 
     expect(runtime_env.DEVTREE_TAILSCALE_HOST).toBe("devbox.example.ts.net");
+  });
+
+  test("injects the persisted Tailscale application URL", () => {
+    const runtime_env = create_runtime_env(
+      create_instance(),
+      {},
+      create_tailscale("proxy"),
+      undefined,
+      {
+        local_url: "http://web-ui.developer.dev.example.com:1355",
+        local_hostname: "web-ui.developer.dev.example.com",
+        tailscale_url: "http://web-ui.developer.dev.example.com:2468",
+        tailscale_hostname: "web-ui.developer.dev.example.com",
+        tailscale_port: 2468,
+        tailscale_ipv4: "100.101.102.103",
+        mapping_key: "node-123:2468",
+        mapping_target: "localhost:1355",
+        mapping_owned: true,
+      },
+    );
+
+    expect(runtime_env.DEVTREE_TAILSCALE_URL).toBe(
+      "http://web-ui.developer.dev.example.com:2468",
+    );
+    expect(runtime_env.DEVTREE_TAILSCALE_APPLICATION_PORT).toBe("2468");
   });
 });

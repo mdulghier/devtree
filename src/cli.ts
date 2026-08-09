@@ -1,4 +1,3 @@
-import { lookup } from "node:dns/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
@@ -36,6 +35,8 @@ import {
   resolve_tailscale_ipv4,
 } from "./hosts.ts";
 import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
+import { format_routing_info_lines } from "./info.ts";
+import { run_interactive_setup } from "./interactive-setup.ts";
 import { resolve_portless_https, resolve_portless_port } from "./hostname.ts";
 import { get_portless_compatibility_error } from "./portless.ts";
 import {
@@ -46,9 +47,21 @@ import {
   type Run_command_options,
 } from "./process.ts";
 import { register_compose_project } from "./registry.ts";
+import {
+  get_persisted_active_tailscale_routing,
+  type Active_tailscale_routing,
+} from "./routing-state.ts";
 import { has_configured_routing_hostname, resolve_routing } from "./routing.ts";
 import { create_runtime_env } from "./runtime-env.ts";
 import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
+import { validate_tailscale_hostname } from "./tailscale-dns.ts";
+import {
+  describe_tailscale_serve_status,
+  ensure_tailscale_serve,
+  inspect_tailscale_serve,
+  remove_owned_tailscale_serve,
+  resolve_tailscale_serve_port,
+} from "./tailscale-serve.ts";
 
 type Command_name =
   | "config"
@@ -60,7 +73,8 @@ type Command_name =
   | "help"
   | "hosts"
   | "info"
-  | "setup";
+  | "setup"
+  | "tailscale";
 
 type Runtime_state = {
   loaded_config: Loaded_devtree_config;
@@ -69,6 +83,7 @@ type Runtime_state = {
   managed_env_values: Record<string, string>;
   effective_env_values: Record<string, string>;
   tailscale: Resolved_tailscale;
+  active_tailscale_routing: Active_tailscale_routing | null;
 };
 
 function print_help() {
@@ -78,8 +93,9 @@ function print_help() {
   console.log("  doctor [--fix]          Check local prerequisites, routing, and Tailscale");
   console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
   console.log("  info                    Print the current instance URLs and resource names");
+  console.log("  tailscale status|remove Inspect or safely remove Devtree's Serve mapping");
   console.log("  hosts                   Print hosts-file entries for this checkout");
-  console.log("  setup                   Write env overrides, start dependencies, run hooks");
+  console.log("  setup [--interactive]   Configure Devtree, sync env, and start dependencies");
   console.log("  dev [-- <vite args>]    Start the app through Devtree routing");
   console.log("  deps start|stop|logs    Manage configured dependencies");
   console.log("  gc [--dry-run] [-v]     Remove orphaned dependency resources");
@@ -144,6 +160,7 @@ function run_process(
       runtime_state.effective_env_values,
       runtime_state.tailscale,
       options?.env,
+      runtime_state.active_tailscale_routing,
     ),
   });
 }
@@ -152,6 +169,14 @@ function get_runtime_state(loaded_config: Loaded_devtree_config) {
   const instance = create_devtree_instance(loaded_config);
   const env_result = ensure_env_file(loaded_config, instance);
   const tailscale = resolve_tailscale(loaded_config.config);
+  const persisted_tailscale_routing =
+    get_persisted_active_tailscale_routing(instance);
+  const active_tailscale_routing =
+    tailscale.node_id &&
+    persisted_tailscale_routing &&
+    !persisted_tailscale_routing.mapping_key.startsWith(`${tailscale.node_id}:`)
+      ? null
+      : persisted_tailscale_routing;
 
   return {
     loaded_config,
@@ -160,16 +185,22 @@ function get_runtime_state(loaded_config: Loaded_devtree_config) {
     managed_env_values: env_result.managed_env_values,
     effective_env_values: env_result.effective_env_values,
     tailscale,
+    active_tailscale_routing,
   };
 }
 
-function print_tailscale_status(tailscale: Resolved_tailscale) {
+function print_tailscale_status(runtime_state: Runtime_state) {
+  const { active_tailscale_routing, tailscale } = runtime_state;
+
   if (!tailscale.enabled) {
     return;
   }
 
-  if (is_proxy_tailscale_mode(tailscale.mode) && tailscale.connected) {
-    console.log("[devtree] Tailscale connected (proxy mode)");
+  if (is_proxy_tailscale_mode(tailscale.mode) && active_tailscale_routing) {
+    console.log(
+      `[devtree] Tailscale Serve tcp:${active_tailscale_routing.tailscale_port} -> ${active_tailscale_routing.mapping_target}`,
+    );
+    console.log(`[devtree] Tailscale application URL ${active_tailscale_routing.tailscale_url}`);
     return;
   }
 
@@ -383,6 +414,74 @@ async function ensure_routing_ready(
   });
 }
 
+function get_tailscale_serve_port(loaded_config: Loaded_devtree_config) {
+  const routing = resolve_routing(loaded_config.config);
+
+  return resolve_tailscale_serve_port(
+    loaded_config.config.tailscale?.serve_port,
+    routing.port,
+  );
+}
+
+function require_proxy_tailscale(runtime_state: Runtime_state) {
+  const { tailscale } = runtime_state;
+
+  if (!tailscale.cli_available) {
+    throw new Error(
+      "Tailscale proxy mode requires the `tailscale` command. Install Tailscale, sign in, and try again.",
+    );
+  }
+
+  if (!tailscale.connected || !tailscale.ipv4 || !tailscale.node_id) {
+    throw new Error(
+      tailscale.error ??
+        "Tailscale proxy mode requires a connected client with an IPv4 address. Run `tailscale status`, sign in if necessary, and try again.",
+    );
+  }
+}
+
+async function ensure_tailscale_proxy_ready(runtime_state: Runtime_state) {
+  if (!is_proxy_tailscale_mode(runtime_state.tailscale.mode)) {
+    return;
+  }
+
+  require_proxy_tailscale(runtime_state);
+
+  await validate_tailscale_hostname(
+    runtime_state.instance.public_hostname,
+    runtime_state.tailscale.ipv4 as string,
+  );
+
+  const routing = resolve_routing(runtime_state.loaded_config.config);
+
+  runtime_state.active_tailscale_routing = ensure_tailscale_serve({
+    instance: runtime_state.instance,
+    tailscale: runtime_state.tailscale,
+    routing_port: routing.port,
+    serve_port: get_tailscale_serve_port(runtime_state.loaded_config),
+  });
+}
+
+function print_application_urls(runtime_state: Runtime_state) {
+  const active_tailscale_routing = runtime_state.active_tailscale_routing;
+
+  console.log("");
+
+  if (active_tailscale_routing) {
+    console.log(`Open ${active_tailscale_routing.tailscale_url}`);
+    console.log(`Tailscale hostname: ${active_tailscale_routing.tailscale_hostname}`);
+    console.log(`Tailscale port: ${active_tailscale_routing.tailscale_port}`);
+
+    if (active_tailscale_routing.local_url !== active_tailscale_routing.tailscale_url) {
+      console.log(`Local URL: ${active_tailscale_routing.local_url}`);
+    }
+
+    return;
+  }
+
+  console.log(`Open ${runtime_state.instance.public_url}`);
+}
+
 function resolve_require_from_root(repo_root: string) {
   return createRequire(resolve(repo_root, "package.json"));
 }
@@ -418,6 +517,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   const dev_server_runner = get_dev_server_runner(loaded_config);
   const dev_server_command = get_dev_server_command(dev_server_runner);
   let instance: Devtree_instance | undefined;
+  let routing_ready = false;
 
   console.log(`[pass] config ${loaded_config.config_path}`);
 
@@ -460,6 +560,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
       } else {
         try {
           ensure_portless_ready(loaded_config, fix);
+          routing_ready = true;
           console.log(
             fix ? "[pass] portless ready (bootstrapped)" : "[pass] portless reachable",
           );
@@ -476,6 +577,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
     } else {
       try {
         await ensure_routing_ready(loaded_config, fix);
+        routing_ready = true;
         console.log(
           fix
             ? `[pass] caddy ready at ${routing.caddy_admin_url} (bootstrapped)`
@@ -489,8 +591,64 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
 
   if (!tailscale.enabled) {
     console.log("[skip] tailscale disabled");
-  } else if (is_proxy_tailscale_mode(tailscale.mode) && tailscale.connected) {
-    console.log("[pass] tailscale connected (proxy mode)");
+  } else if (is_proxy_tailscale_mode(tailscale.mode)) {
+    if (!tailscale.connected || !tailscale.ipv4 || !tailscale.node_id) {
+      issues.push(
+        tailscale.error ??
+          "Tailscale proxy mode requires a connected client with an IPv4 address",
+      );
+    } else if (instance) {
+      try {
+        const dns_resolution = await validate_tailscale_hostname(
+          instance.public_hostname,
+          tailscale.ipv4,
+        );
+        const routing = resolve_routing(loaded_config.config);
+        const serve_port = get_tailscale_serve_port(loaded_config);
+
+        console.log(
+          dns_resolution === "tailnet"
+            ? `[pass] tailnet hostname ${instance.public_hostname} -> ${tailscale.ipv4}`
+            : `[pass] local hosts entry ${instance.public_hostname} -> loopback; remote machines must map it to ${tailscale.ipv4}`,
+        );
+
+        if (!routing_ready) {
+          issues.push(
+            "Tailscale Serve was not checked because the configured routing provider is not ready",
+          );
+        } else if (fix) {
+          const active_routing = ensure_tailscale_serve({
+            instance,
+            tailscale,
+            routing_port: routing.port,
+            serve_port,
+          });
+
+          console.log(
+            `[pass] tailscale Serve tcp:${serve_port} -> ${active_routing.mapping_target} (reconciled)`,
+          );
+        } else {
+          const inspection = inspect_tailscale_serve({
+            instance,
+            tailscale,
+            routing_port: routing.port,
+            serve_port,
+          });
+
+          if (!inspection.matches) {
+            issues.push(
+              `Tailscale Serve port ${serve_port} must forward raw TCP to tcp://${inspection.target}; found ${describe_tailscale_serve_status(inspection.status)}. Run \`pnpm devtree doctor --fix\`.`,
+            );
+          } else {
+            console.log(
+              `[pass] tailscale Serve tcp:${serve_port} -> ${inspection.target}`,
+            );
+          }
+        }
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : String(error));
+      }
+    }
   } else if (tailscale.mode === "direct" && tailscale.host) {
     console.log(`[pass] tailscale host ${tailscale.host}`);
   } else {
@@ -499,19 +657,6 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
 
   if (is_proxy_tailscale_mode(tailscale.mode)) {
     console.log("[pass] Vite host 127.0.0.1 (proxy mode)");
-
-    if (instance) {
-      try {
-        const resolved_address = await lookup(instance.public_hostname);
-        console.log(
-          `[pass] canonical hostname resolves ${instance.public_hostname} -> ${resolved_address.address}`,
-        );
-      } catch {
-        issues.push(
-          `public hostname ${instance.public_hostname} does not resolve on this machine. Configure DNS or add the local entry printed by \`pnpm devtree hosts\`; Devtree will not modify DNS or hosts files.`,
-        );
-      }
-    }
   }
 
   if (compose_dependencies.length > 0) {
@@ -568,8 +713,21 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
 }
 
 function print_info(runtime_state: Runtime_state) {
-  console.log(`Public URL: ${runtime_state.instance.public_url}`);
-  console.log(`Public hostname: ${runtime_state.instance.public_hostname}`);
+  const configured_tailscale_port = is_proxy_tailscale_mode(
+    runtime_state.tailscale.mode,
+  )
+    ? get_tailscale_serve_port(runtime_state.loaded_config)
+    : resolve_routing(runtime_state.loaded_config.config).port;
+
+  for (const line of format_routing_info_lines({
+    instance: runtime_state.instance,
+    tailscale_mode: runtime_state.tailscale.mode,
+    active_tailscale_routing: runtime_state.active_tailscale_routing,
+    configured_tailscale_port,
+  })) {
+    console.log(line);
+  }
+
   console.log(`App name: ${runtime_state.instance.app_name}`);
   console.log(`Instance ID: ${runtime_state.instance.instance_id}`);
   console.log(`Scoped name: ${runtime_state.instance.scoped_name}`);
@@ -604,7 +762,24 @@ async function main() {
     return;
   }
 
-  const loaded_config = await load_devtree_config();
+  let loaded_config = await load_devtree_config();
+
+  if (
+    command_name === "setup" &&
+    (argv.includes("--interactive") || argv.includes("-i"))
+  ) {
+    const setup_result = await run_interactive_setup(loaded_config);
+
+    if (!setup_result.configured) {
+      return;
+    }
+
+    if (!setup_result.continue_setup) {
+      return;
+    }
+
+    loaded_config = await load_devtree_config();
+  }
 
   if (command_name === "doctor") {
     await run_doctor(loaded_config, argv.includes("--fix"));
@@ -664,6 +839,62 @@ async function main() {
     return;
   }
 
+  if (command_name === "tailscale") {
+    const tailscale_subcommand = argv[1];
+
+    if (tailscale_subcommand !== "status" && tailscale_subcommand !== "remove") {
+      throw new Error("Usage: devtree tailscale <status|remove>");
+    }
+
+    ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
+
+    if (!is_proxy_tailscale_mode(runtime_state.tailscale.mode)) {
+      throw new Error(
+        'The `devtree tailscale` command requires tailscale.enabled: true and tailscale.mode: "proxy".',
+      );
+    }
+
+    require_proxy_tailscale(runtime_state);
+
+    const routing = resolve_routing(loaded_config.config);
+    const serve_port = get_tailscale_serve_port(loaded_config);
+
+    if (tailscale_subcommand === "status") {
+      const inspection = inspect_tailscale_serve({
+        instance: runtime_state.instance,
+        tailscale: runtime_state.tailscale,
+        routing_port: routing.port,
+        serve_port,
+      });
+
+      console.log(`Tailscale Serve port: ${serve_port}`);
+      console.log(`Required mapping: tcp:${serve_port} -> ${inspection.target}`);
+      console.log(`Live mapping: ${describe_tailscale_serve_status(inspection.status)}`);
+      console.log(`Ready: ${inspection.matches ? "yes" : "no"}`);
+      console.log(
+        `Ownership: ${inspection.persisted_mapping?.owned ? "Devtree" : "not owned by Devtree"}`,
+      );
+      console.log(
+        `Recorded worktrees: ${inspection.persisted_mapping?.consumer_instance_ids.length ?? 0}`,
+      );
+      return;
+    }
+
+    const removal = remove_owned_tailscale_serve({
+      instance: runtime_state.instance,
+      tailscale: runtime_state.tailscale,
+      routing_port: routing.port,
+      serve_port,
+    });
+
+    console.log(
+      removal.removed
+        ? `Removed Devtree's Tailscale Serve mapping on TCP port ${serve_port}. Other Serve ports were preserved.`
+        : `Tailscale Serve port ${serve_port} was already absent. Removed stale Devtree ownership state.`,
+    );
+    return;
+  }
+
   if (command_name === "env") {
     const env_subcommand = argv[1];
 
@@ -693,7 +924,8 @@ async function main() {
   if (command_name === "setup") {
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);
-    print_tailscale_status(runtime_state.tailscale);
+    await ensure_tailscale_proxy_ready(runtime_state);
+    print_tailscale_status(runtime_state);
 
     for (const dependency of loaded_config.config.dependencies ?? []) {
       if (dependency.kind === "compose") {
@@ -707,7 +939,8 @@ async function main() {
     run_hook(runtime_state, "migrate");
     run_hook(runtime_state, "post_setup");
 
-    console.log(`Open ${runtime_state.instance.public_url} after starting the app.`);
+    print_application_urls(runtime_state);
+    console.log("Start the application before opening the URL above.");
     if (runtime_state.tailscale.mode === "direct" && runtime_state.tailscale.host) {
       console.log(`Tailscale hostname available to Vite: ${runtime_state.tailscale.host}`);
     }
@@ -759,7 +992,8 @@ async function main() {
 
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);
-    print_tailscale_status(runtime_state.tailscale);
+    await ensure_tailscale_proxy_ready(runtime_state);
+    print_tailscale_status(runtime_state);
     run_hook(runtime_state, "pre_dev");
 
     const vite_port =
@@ -808,6 +1042,8 @@ async function main() {
       );
     }
 
+    print_application_urls(runtime_state);
+
     let exit_status = 0;
 
     try {
@@ -821,6 +1057,7 @@ async function main() {
               PORTLESS_HTTPS: routing.https ? "1" : "0",
             }
           : undefined,
+        runtime_state.active_tailscale_routing,
       );
 
       exit_status =
