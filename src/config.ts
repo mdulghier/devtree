@@ -80,6 +80,9 @@ export type Devtree_dependency = Compose_dependency | Command_dependency;
 export type Devtree_config = {
   app_name: string;
   namespace?: string;
+  registry?: {
+    enabled?: boolean;
+  };
   routing?: {
     provider?: Routing_provider;
     hostname?: (context: Routing_hostname_context) => string;

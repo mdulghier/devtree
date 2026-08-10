@@ -2,18 +2,19 @@
 name: devtree-run-and-operate-devtree
 description: >
   Run and troubleshoot daily devtree workflows: `doctor`, `setup`, `dev`,
-  `info`, `env write`, `env show`, `deps start|stop|logs`, and `gc`. Load
+  `info`, `list`, `env write`, `env show`, `deps start|stop|logs`, and `gc`. Load
   this when an agent needs to verify that the app is running, reachable at
   the worktree URL, and cleaned up correctly after worktrees are deleted.
 type: core
 library: devtree
-library_version: "0.3.0"
+library_version: "0.4.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/cli.ts"
   - "mdulghier/devtree:src/command-builder.ts"
   - "mdulghier/devtree:src/gc.ts"
   - "mdulghier/devtree:src/registry.ts"
+  - "mdulghier/devtree:src/environment-registry.ts"
   - "mdulghier/devtree:src/process.ts"
   - "mdulghier/devtree:src/instance.ts"
 ---
@@ -36,6 +37,13 @@ Then inspect the assigned URL and names.
 
 ```bash
 pnpm devtree info
+```
+
+List all running Devtree environments from any directory.
+
+```bash
+pnpx devtree list
+pnpx devtree list --json
 ```
 
 For cleanup and dependency inspection:
@@ -71,6 +79,8 @@ pnpm devtree info
 ```
 
 `info` prints the exact local and Tailscale application URLs, required hostname and port, active Serve mapping, routing provider, app name, instance ID, scoped name, worktree identity, env provider, env file, and Compose project names. Persisted routing state keeps this output stable in a fresh shell.
+
+Use `pnpx devtree list` outside a checkout to inspect every live Devtree session on the machine. It reports the worktree path, URL, controller PID, and development-runner PID. Projects with `registry.enabled: false` in `.devtree.yml` are deliberately omitted.
 
 In Tailscale proxy mode, `doctor` checks Caddy, hostname resolution, Tailscale connectivity, and the shared raw TCP Serve mapping. `doctor --fix`, `setup`, and `dev` reconcile that mapping idempotently without resetting or changing unrelated Serve routes. Vite remains on `127.0.0.1`.
 

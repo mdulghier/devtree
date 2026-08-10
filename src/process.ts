@@ -17,6 +17,10 @@ export type Logged_command_options = Run_command_options & {
   detached?: boolean;
 };
 
+export type Async_run_command_options = Run_command_options & {
+  on_spawn?: (pid: number) => void;
+};
+
 export function command_exists(command: string) {
   const result = spawnSync("which", [command], {
     cwd: process.cwd(),
@@ -128,13 +132,17 @@ export function run_command_inherit(
 export function run_command_inherit_async(
   command: string,
   args: string[],
-  options?: Run_command_options,
+  options?: Async_run_command_options,
 ) {
   const child_process = spawn(command, args, {
     cwd: options?.cwd ?? process.cwd(),
     env: { ...process.env, ...options?.env },
     stdio: "inherit",
   });
+
+  if (child_process.pid !== undefined) {
+    options?.on_spawn?.(child_process.pid);
+  }
 
   return new Promise<number>((resolve_result, reject_result) => {
     const forwarded_signals = ["SIGINT", "SIGTERM"] as const;

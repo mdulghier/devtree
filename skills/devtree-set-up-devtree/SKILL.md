@@ -8,7 +8,7 @@ description: >
   local development without URL, env, or Docker naming collisions.
 type: core
 library: devtree
-library_version: "0.3.0"
+library_version: "0.4.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/config.ts"

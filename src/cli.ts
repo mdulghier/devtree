@@ -27,6 +27,17 @@ import {
   is_proxy_tailscale_mode,
 } from "./doctor.ts";
 import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
+import {
+  format_environment_list,
+  format_environment_list_json,
+} from "./environment-list.ts";
+import {
+  create_environment_session,
+  list_environment_sessions,
+  remove_environment_session,
+  set_environment_session_runner_pid,
+  type Environment_session,
+} from "./environment-registry.ts";
 import { run_gc } from "./gc.ts";
 import {
   format_local_hosts_section,
@@ -73,6 +84,7 @@ type Command_name =
   | "help"
   | "hosts"
   | "info"
+  | "list"
   | "setup"
   | "tailscale";
 
@@ -93,6 +105,7 @@ function print_help() {
   console.log("  doctor [--fix]          Check local prerequisites, routing, and Tailscale");
   console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
   console.log("  info                    Print the current instance URLs and resource names");
+  console.log("  list [--json]           List running Devtree environments on this machine");
   console.log("  tailscale status|remove Inspect or safely remove Devtree's Serve mapping");
   console.log("  hosts                   Print hosts-file entries for this checkout");
   console.log("  setup [--interactive]   Configure Devtree, sync env, and start dependencies");
@@ -736,6 +749,9 @@ function print_info(runtime_state: Runtime_state) {
   console.log(`Routing provider: ${runtime_state.instance.routing_provider}`);
   console.log(`Routing enabled: ${runtime_state.instance.routing_enabled ? "yes" : "no"}`);
   console.log(`Portless enabled: ${runtime_state.instance.portless_enabled ? "yes" : "no"}`);
+  console.log(
+    `Environment registry: ${runtime_state.loaded_config.config.registry?.enabled === false ? "disabled" : "enabled"}`,
+  );
   console.log(`Tailscale mode: ${runtime_state.tailscale.mode}`);
   console.log(`Env provider: ${runtime_state.loaded_config.config.env.provider}`);
   console.log(`Env file: ${runtime_state.instance.env_file_path}`);
@@ -759,6 +775,22 @@ async function main() {
 
   if (command_name === "help") {
     print_help();
+    return;
+  }
+
+  if (command_name === "list") {
+    const list_args = argv.slice(1);
+
+    if (list_args.some((arg) => arg !== "--json")) {
+      throw new Error("Usage: devtree list [--json]");
+    }
+
+    const sessions = list_environment_sessions();
+    console.log(
+      list_args.includes("--json")
+        ? format_environment_list_json(sessions)
+        : format_environment_list(sessions),
+    );
     return;
   }
 
@@ -1045,6 +1077,17 @@ async function main() {
     print_application_urls(runtime_state);
 
     let exit_status = 0;
+    let environment_session: Environment_session | null = null;
+
+    if (loaded_config.config.registry?.enabled !== false) {
+      try {
+        environment_session = create_environment_session(runtime_state.instance);
+      } catch (error) {
+        console.warn(
+          `[devtree] Could not register this environment: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
 
     try {
       const runtime_env = create_runtime_env(
@@ -1060,13 +1103,37 @@ async function main() {
         runtime_state.active_tailscale_routing,
       );
 
-      exit_status =
-        routing.provider_kind === "caddy"
-          ? await run_command_inherit_async(command, args, { env: runtime_env })
-          : run_command_inherit(command, args, { env: runtime_env });
+      exit_status = await run_command_inherit_async(command, args, {
+        env: runtime_env,
+        on_spawn: (runner_pid) => {
+          if (!environment_session) {
+            return;
+          }
+
+          try {
+            set_environment_session_runner_pid(environment_session, runner_pid);
+          } catch (error) {
+            console.warn(
+              `[devtree] Could not update this environment's registry entry: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        },
+      });
     } finally {
-      if (routing.provider_kind === "caddy" && routing.caddy_admin_url && caddy_route_id) {
-        await remove_caddy_route(routing.caddy_admin_url, caddy_route_id);
+      try {
+        if (routing.provider_kind === "caddy" && routing.caddy_admin_url && caddy_route_id) {
+          await remove_caddy_route(routing.caddy_admin_url, caddy_route_id);
+        }
+      } finally {
+        if (environment_session) {
+          try {
+            remove_environment_session(environment_session.session_id);
+          } catch (error) {
+            console.warn(
+              `[devtree] Could not remove this environment's registry entry: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
       }
     }
 

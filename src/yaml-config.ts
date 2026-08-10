@@ -29,8 +29,13 @@ type Yaml_tailscale_config = {
   serve_port?: number;
 };
 
+type Yaml_registry_config = {
+  enabled?: boolean;
+};
+
 export type Devtree_yaml_config = {
   version?: 1;
+  registry?: Yaml_registry_config;
   routing?: Yaml_routing_config;
   tailscale?: Yaml_tailscale_config;
 };
@@ -43,7 +48,8 @@ export type Loaded_devtree_yaml_config = {
   merged: Devtree_yaml_config;
 };
 
-const top_level_keys = new Set(["version", "routing", "tailscale"]);
+const top_level_keys = new Set(["version", "registry", "routing", "tailscale"]);
+const registry_keys = new Set(["enabled"]);
 const routing_keys = new Set([
   "provider",
   "base_domain",
@@ -185,6 +191,25 @@ function parse_tailscale_config(
   };
 }
 
+function parse_registry_config(
+  value: unknown,
+  source: string,
+): Yaml_registry_config | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!is_record(value)) {
+    throw new Error(`${source} must be a mapping.`);
+  }
+
+  assert_known_keys(value, registry_keys, source);
+
+  return {
+    enabled: read_optional_boolean(value, "enabled", source),
+  };
+}
+
 export function parse_devtree_yaml_config(
   yaml_text: string,
   source = DEVTREE_PROJECT_CONFIG_FILENAME,
@@ -213,6 +238,7 @@ export function parse_devtree_yaml_config(
 
   return {
     version: raw_config.version as 1 | undefined,
+    registry: parse_registry_config(raw_config.registry, `${source}.registry`),
     routing: parse_routing_config(raw_config.routing, `${source}.routing`),
     tailscale: parse_tailscale_config(raw_config.tailscale, `${source}.tailscale`),
   };
@@ -240,9 +266,18 @@ function merge_yaml_config(
       ([, value]) => value !== undefined,
     ),
   ) as Yaml_tailscale_config;
+  const defined_registry_overrides = Object.fromEntries(
+    Object.entries(override_config.registry ?? {}).filter(
+      ([, value]) => value !== undefined,
+    ),
+  ) as Yaml_registry_config;
 
   return {
     version: override_config.version ?? base_config.version,
+    registry:
+      base_config.registry || override_config.registry
+        ? { ...base_config.registry, ...defined_registry_overrides }
+        : undefined,
     routing:
       base_config.routing || override_config.routing
         ? { ...base_config.routing, ...defined_routing_overrides }
@@ -309,6 +344,7 @@ export function apply_devtree_yaml_config(
 ): Devtree_config {
   const yaml_routing = yaml_config.routing;
   const yaml_tailscale = yaml_config.tailscale;
+  const yaml_registry = yaml_config.registry;
   const hostname_resolver = yaml_routing
     ? create_yaml_hostname_resolver(yaml_routing)
     : null;
@@ -318,9 +354,18 @@ export function apply_devtree_yaml_config(
   const has_tailscale_values =
     yaml_tailscale !== undefined &&
     Object.values(yaml_tailscale).some((value) => value !== undefined);
+  const has_registry_values =
+    yaml_registry !== undefined &&
+    Object.values(yaml_registry).some((value) => value !== undefined);
 
   return {
     ...config,
+    registry: has_registry_values
+      ? {
+          ...config.registry,
+          enabled: yaml_registry.enabled ?? config.registry?.enabled,
+        }
+      : config.registry,
     routing: has_routing_values
       ? {
           ...config.routing,

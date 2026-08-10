@@ -168,6 +168,30 @@ Inspect the current checkout at any time:
 pnpm devtree info
 ```
 
+List every running Devtree environment on the machine from any directory:
+
+```bash
+pnpx devtree list
+pnpx devtree list --json
+```
+
+The list includes each environment's worktree path, public URL, Devtree process ID,
+and immediate development-runner process ID. Devtree removes the session when the
+development process exits and prunes stale sessions left behind by crashes.
+
+Environment registration is enabled by default. To keep a project out of the
+machine-wide list, commit this setting in `.devtree.yml`:
+
+```yaml
+version: 1
+registry:
+  enabled: false
+```
+
+This setting only controls the live environment list. It does not disable routing
+state or Docker dependency metadata. A developer can override the shared setting
+in `.devtree.local.yml`; the setting takes effect the next time `devtree dev` starts.
+
 ## Using Git worktrees
 
 Create a worktree as usual:

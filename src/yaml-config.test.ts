@@ -133,6 +133,47 @@ describe("Devtree YAML configuration", () => {
     ).toBe("web-ui.custom.internal.example");
   });
 
+  test("supports project registry opt-out with a local override", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-yaml-registry-test-"));
+
+    try {
+      writeFileSync(
+        resolve(repo_root, ".devtree.yml"),
+        "version: 1\nregistry:\n  enabled: false\n",
+      );
+      writeFileSync(
+        resolve(repo_root, ".devtree.local.yml"),
+        "version: 1\nregistry:\n  enabled: true\n",
+      );
+
+      const yaml_config = load_devtree_yaml_config(repo_root);
+      const config = apply_devtree_yaml_config(
+        create_base_config(),
+        yaml_config.merged,
+      );
+      const project_config = apply_devtree_yaml_config(
+        create_base_config(),
+        yaml_config.project,
+      );
+
+      expect(yaml_config.project.registry?.enabled).toBe(false);
+      expect(yaml_config.local.registry?.enabled).toBe(true);
+      expect(project_config.registry?.enabled).toBe(false);
+      expect(config.registry?.enabled).toBe(true);
+    } finally {
+      rmSync(repo_root, { force: true, recursive: true });
+    }
+  });
+
+  test("rejects invalid registry settings", () => {
+    expect(() =>
+      parse_devtree_yaml_config(
+        "registry:\n  enabled: sometimes\n",
+        ".devtree.yml",
+      ),
+    ).toThrow(".devtree.yml.registry.enabled must be true or false");
+  });
+
   test("rejects unknown keys with the source filename", () => {
     expect(() =>
       parse_devtree_yaml_config(
