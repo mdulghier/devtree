@@ -1,21 +1,33 @@
-import { afterEach, describe, expect, test } from "vite-plus/test";
+import { describe, expect, test } from "vite-plus/test";
 
-import type { Devtree_config, Portless_hostname_context } from "./config.ts";
+import type { Devtree_config, Routing_hostname_context } from "./config.ts";
 import {
-  create_portless_worktree_slug,
+  create_identity_slug,
   format_public_url,
+  join_identity_slugs,
   resolve_configured_public_hostname,
-  resolve_legacy_public_hostname,
+  resolve_default_public_hostname,
   resolve_portless_https,
   resolve_portless_port,
   validate_public_hostname,
 } from "./hostname.ts";
 
-function create_config(
-  hostname?: (context: Portless_hostname_context) => string,
-): Devtree_config {
+function create_context(
+  overrides: Partial<Routing_hostname_context> = {},
+): Routing_hostname_context {
   return {
-    app_name: "web-ui",
+    project_name: "acme-cloud",
+    session_name: "default",
+    endpoint_name: "ui",
+    is_primary_endpoint: true,
+    is_default_session: true,
+    ...overrides,
+  };
+}
+
+function create_config(hostname?: (context: Routing_hostname_context) => string): Devtree_config {
+  return {
+    project_name: "acme-cloud",
     portless: hostname ? { hostname } : undefined,
     env: {
       provider: "dotenv",
@@ -24,48 +36,37 @@ function create_config(
   };
 }
 
-afterEach(() => {
-  delete process.env.DEVTREE_DEVELOPER_NAMESPACE;
-  delete process.env.DEVTREE_PUBLIC_DOMAIN;
-});
-
-describe("Portless hostnames", () => {
-  test("keeps the legacy main-checkout .localhost hostname", () => {
-    expect(resolve_legacy_public_hostname("web-ui", null, {})).toBe("web-ui.localhost");
+describe("endpoint hostnames", () => {
+  test("uses the short project hostname for the default primary endpoint", () => {
+    expect(resolve_default_public_hostname(create_context(), {})).toBe("acme-cloud.localhost");
   });
 
-  test("keeps the legacy worktree .localhost hostname", () => {
-    expect(resolve_legacy_public_hostname("web-ui", "feature-123", {})).toBe(
-      "feature-123.web-ui.localhost",
-    );
+  test("includes session and secondary endpoint names", () => {
+    expect(
+      resolve_default_public_hostname(
+        create_context({
+          session_name: "billing-redesign",
+          endpoint_name: "api",
+          is_primary_endpoint: false,
+          is_default_session: false,
+        }),
+        {},
+      ),
+    ).toBe("billing-redesign.api.acme-cloud.localhost");
   });
 
-  test("resolves a canonical main-checkout hostname", () => {
+  test("resolves a configured complete hostname", () => {
     const config = create_config(
-      ({ app_name }) => `${app_name}.developer.dev.example.com`,
+      ({ project_name, session_name, endpoint_name }) =>
+        `${session_name}-${endpoint_name}.${project_name}.example.com`,
     );
 
     expect(
-      resolve_configured_public_hostname(config, {
-        app_name: "web-ui",
-        worktree_slug: null,
-      }),
-    ).toBe("web-ui.developer.dev.example.com");
-  });
-
-  test("resolves a canonical flattened worktree hostname", () => {
-    const config = create_config(({ app_name, worktree_slug }) => {
-      const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
-
-      return `${route_name}.developer.dev.example.com`;
-    });
-
-    expect(
-      resolve_configured_public_hostname(config, {
-        app_name: "web-ui",
-        worktree_slug: "feature-123",
-      }),
-    ).toBe("feature-123--web-ui.developer.dev.example.com");
+      resolve_configured_public_hostname(
+        config,
+        create_context({ session_name: "billing", is_default_session: false }),
+      ),
+    ).toBe("billing-ui.acme-cloud.example.com");
   });
 
   test("formats protocol and proxy-port configuration", () => {
@@ -79,48 +80,10 @@ describe("Portless hostnames", () => {
 
     expect(resolve_portless_https(config, {})).toBe(true);
     expect(resolve_portless_port(config, {})).toBe(2468);
-    expect(format_public_url("web-ui.example.com", true, 2468)).toBe(
-      "https://web-ui.example.com:2468",
+    expect(format_public_url("acme-cloud.example.com", true, 2468)).toBe(
+      "https://acme-cloud.example.com:2468",
     );
   });
-
-  test("inherits legacy protocol and port environment variables", () => {
-    const config = create_config();
-
-    expect(resolve_portless_https(config, { PORTLESS_HTTPS: "1" })).toBe(true);
-    expect(resolve_portless_port(config, { PORTLESS_PORT: "1356" })).toBe(1356);
-  });
-
-  test.each(["DEVTREE_DEVELOPER_NAMESPACE", "DEVTREE_PUBLIC_DOMAIN"])(
-    "reports a missing %s value actionably",
-    (missing_name) => {
-      process.env.DEVTREE_DEVELOPER_NAMESPACE = "developer";
-      process.env.DEVTREE_PUBLIC_DOMAIN = "dev.example.com";
-      delete process.env[missing_name];
-
-      const config = create_config(({ app_name }) => {
-        const developer_namespace = process.env.DEVTREE_DEVELOPER_NAMESPACE?.trim();
-        const public_domain = process.env.DEVTREE_PUBLIC_DOMAIN?.trim();
-
-        if (!developer_namespace) {
-          throw new Error("DEVTREE_DEVELOPER_NAMESPACE is required");
-        }
-
-        if (!public_domain) {
-          throw new Error("DEVTREE_PUBLIC_DOMAIN is required");
-        }
-
-        return `${app_name}.${developer_namespace}.${public_domain}`;
-      });
-
-      expect(() =>
-        resolve_configured_public_hostname(config, {
-          app_name: "web-ui",
-          worktree_slug: null,
-        }),
-      ).toThrow(missing_name);
-    },
-  );
 
   test("rejects invalid and excessively long hostnames", () => {
     expect(() => validate_public_hostname("bad_host.example.com")).toThrow(
@@ -129,26 +92,26 @@ describe("Portless hostnames", () => {
     expect(() => validate_public_hostname(`${"a".repeat(64)}.example.com`)).toThrow(
       "63-character DNS label limit",
     );
-    expect(() =>
-      validate_public_hostname(
-        `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(62)}`,
-      ),
-    ).toThrow("253-character DNS hostname limit");
   });
 
-  test("makes normalized and long worktree identities collision-resistant", () => {
-    const slash_slug = create_portless_worktree_slug("Feature/Foo", "web-ui", "one");
-    const punctuation_slug = create_portless_worktree_slug("feature_foo", "web-ui", "two");
-    const long_slug = create_portless_worktree_slug("a".repeat(100), "web-ui", "three");
+  test("makes normalized and long identities collision-resistant", () => {
+    const slash_slug = create_identity_slug("Feature/Foo", "one");
+    const punctuation_slug = create_identity_slug("feature_foo", "two");
+    const long_slug = create_identity_slug("a".repeat(100), "three");
 
     expect(slash_slug).not.toBe(punctuation_slug);
     expect(slash_slug).toMatch(/^feature-foo-[a-f0-9]{8}$/u);
-    expect(long_slug.length + "--web-ui".length).toBeLessThanOrEqual(63);
+    expect(long_slug.length).toBeLessThanOrEqual(63);
   });
 
-  test("uses a deterministic fallback for an empty worktree identity", () => {
-    expect(create_portless_worktree_slug(null, "web-ui", "abc123")).toBe(
-      "worktree-abc123",
-    );
+  test("keeps flattened Caddy route labels within the DNS limit", () => {
+    const label = join_identity_slugs([
+      "feature-with-a-very-descriptive-name",
+      "internal-administration-api",
+      "enterprise-operations-cloud",
+    ]);
+
+    expect(label.length).toBeLessThanOrEqual(63);
+    expect(label).toMatch(/-[a-f0-9]{8}$/u);
   });
 });

@@ -21,20 +21,28 @@ export function is_localhost_hostname(public_hostname: string) {
   return public_hostname === "localhost" || public_hostname.endsWith(".localhost");
 }
 
-export function format_local_hosts_section(public_hostname: string) {
+function normalize_hostnames(public_hostnames: string | string[]) {
+  return Array.isArray(public_hostnames) ? public_hostnames : [public_hostnames];
+}
+
+export function format_local_hosts_section(public_hostnames: string | string[]) {
   return [
     "Add to the hosts file on this development machine:",
-    create_hosts_entry("127.0.0.1", public_hostname),
+    ...normalize_hostnames(public_hostnames).map((hostname) =>
+      create_hosts_entry("127.0.0.1", hostname),
+    ),
   ].join("\n");
 }
 
 export function format_tailscale_hosts_section(
-  public_hostname: string,
+  public_hostnames: string | string[],
   tailscale_ip: string,
 ) {
   return [
     "Add to the hosts file on other Tailscale machines:",
-    create_hosts_entry(tailscale_ip, public_hostname),
+    ...normalize_hostnames(public_hostnames).map((hostname) =>
+      create_hosts_entry(tailscale_ip, hostname),
+    ),
   ].join("\n");
 }
 

@@ -4,13 +4,13 @@ This example gives the Vite application one custom URL that works on the
 development machine and from other authorized machines on the same Tailscale
 network.
 
-With the example values below, the main checkout uses:
+With the example values below, the default session uses:
 
 ```text
 http://caddy-demo.alice.devtree.test:1355
 ```
 
-A worktree named `caddy-worktree` uses:
+A session named `caddy-worktree` uses:
 
 ```text
 http://caddy-worktree--caddy-demo.alice.devtree.test:1355
@@ -18,7 +18,8 @@ http://caddy-worktree--caddy-demo.alice.devtree.test:1355
 
 Caddy receives both URLs on the shared port and sends each one to the correct
 Vite process. Hosts file entries make the names available without setting up DNS.
-The example also starts separate PostgreSQL and Redis services for every worktree.
+The default session owns PostgreSQL and Redis. Other sessions reuse that stack by
+default and can request an isolated stack with `-d`.
 
 ## Before you start
 
@@ -91,7 +92,7 @@ for every worktree and preserves unrelated Serve routes.
 pnpm devtree hosts
 ```
 
-Devtree prints two lines for the current checkout:
+Devtree prints local and remote hosts-file sections for the current session:
 
 ```text
 Add to the hosts file on this development machine:
@@ -122,7 +123,7 @@ sudo nano /etc/hosts
 Devtree prints the entries but does not request administrator access or edit the
 file for you.
 
-### 5. Check and prepare the checkout
+### 5. Check and prepare the default session
 
 After adding the hosts file entries, run:
 
@@ -130,16 +131,16 @@ After adding the hosts file entries, run:
 pnpm devtree setup
 ```
 
-The command verifies Caddy, Tailscale, and hostname resolution, reconciles the shared
-mapping, writes this checkout's URL and dependency ports to `.env.local`, and starts
-PostgreSQL and Redis through Docker Compose.
+The command verifies Caddy, Tailscale, and hostname resolution, reconciles the
+shared mapping, writes this session's URL and dependency ports to `.env.local`,
+and starts PostgreSQL and Redis through Docker Compose.
 
-Devtree gives the checkout its own Compose project, containers, network, database
-volume, and host ports. A second worktree can therefore run the same services at
-the same time without sharing data or ports.
+Devtree gives the dependency owner its own Compose project, containers, network,
+database volume, and host ports. Sessions that reuse that owner resolve the same
+ports and connection URLs.
 
 Open `.env.local` to see the values shared by Vite and Docker Compose. The exact
-ports vary by checkout, but the Devtree-managed section includes values like:
+ports vary by dependency owner, but the Devtree-managed section includes values like:
 
 ```dotenv
 DATABASE_PORT=5891
@@ -162,7 +163,7 @@ Open
 on the development machine. Open the exact same URL on another machine after
 adding its hosts file entry.
 
-The page shows its configured hostname, URL, checkout identity, PostgreSQL port,
+The page shows its configured hostname, URL, session identity, PostgreSQL port,
 and Redis port so you can confirm that Caddy and the dependency setup reached the
 correct checkout. The demonstration application displays the ports but does not
 connect to either service. Full connection URLs remain server-side in `.env.local`
@@ -190,24 +191,25 @@ worktree hostname needs its own line.
 Then start the worktree:
 
 ```bash
-pnpm devtree setup
 pnpm devtree dev
 ```
 
 Open
 [http://caddy-worktree--caddy-demo.alice.devtree.test:1355](http://caddy-worktree--caddy-demo.alice.devtree.test:1355).
-The main checkout remains available at its original URL.
+The default session remains available at its original URL, and the worktree
+reuses its dependency stack. Run `pnpm devtree dev -d` instead when the new
+session needs isolated PostgreSQL and Redis data.
 
 ## What each part does
 
-- Devtree chooses the checkout identity, local Vite port, hostname, and URL. It
+- Devtree chooses the session identity, local Vite port, hostname, and URL. It
   keeps those values consistent in Caddy, Vite, `.env.local`, Docker Compose, and
   command output.
 - Caddy listens on port `1355` and sends each hostname to its Vite process.
 - The hosts files tell each machine which IP address belongs to each hostname.
 - Tailscale carries traffic from another authorized machine to Caddy.
-- Docker Compose starts a separate PostgreSQL database and Redis service for each
-  checkout using the ports Devtree wrote to `.env.local`.
+- Docker Compose starts PostgreSQL and Redis for each dependency owner using the
+  ports Devtree wrote to `.env.local`.
 
 There is one Caddy process and one Tailscale forwarding rule on the development
 machine. Worktrees add routes and hosts file entries, not more shared processes.
@@ -217,7 +219,7 @@ machine. Worktrees add routes and hosts file entries, not more shared processes.
 Run these from `examples/caddy-hosts` in the checkout you want to inspect:
 
 ```bash
-# Show the URL, hostname, routing provider, and checkout identity
+# Show the project, session, URL, hostname, and dependency owner
 pnpm devtree info
 
 # Inspect the live shared Serve mapping and its ownership
@@ -229,7 +231,7 @@ pnpm devtree hosts
 # Check the setup without changing it
 pnpm devtree doctor
 
-# Stop this checkout's PostgreSQL and Redis containers
+# Stop this session's PostgreSQL and Redis containers when it owns them
 pnpm devtree deps stop
 ```
 
@@ -239,8 +241,8 @@ cannot prove ownership and never resets or removes unrelated Serve routes.
 
 Stop the development server with `Ctrl+C`.
 
-Before removing the demonstration worktree, stop its containers from that
-worktree's `examples/caddy-hosts` directory:
+If the demonstration worktree was started with `-d`, stop its containers from
+that worktree's `examples/caddy-hosts` directory before removing it:
 
 ```bash
 pnpm devtree deps stop

@@ -1,200 +1,162 @@
 ---
 name: devtree-run-and-operate-devtree
 description: >
-  Run and troubleshoot daily devtree workflows: `doctor`, `setup`, `dev`,
-  `info`, `list`, `env write`, `env show`, `deps start|stop|logs`, and `gc`. Load
-  this when an agent needs to verify that the app is running, reachable at
-  the worktree URL, and cleaned up correctly after worktrees are deleted.
+  Start, inspect, troubleshoot, and clean up named Devtree sessions and their
+  owned or reused dependency stacks across a main checkout and Git worktrees.
 type: core
 library: devtree
-library_version: "0.4.0"
+library_version: "0.5.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/cli.ts"
-  - "mdulghier/devtree:src/command-builder.ts"
-  - "mdulghier/devtree:src/gc.ts"
-  - "mdulghier/devtree:src/registry.ts"
+  - "mdulghier/devtree:src/session-options.ts"
   - "mdulghier/devtree:src/environment-registry.ts"
-  - "mdulghier/devtree:src/process.ts"
-  - "mdulghier/devtree:src/instance.ts"
+  - "mdulghier/devtree:src/registry.ts"
+  - "mdulghier/devtree:src/gc.ts"
 ---
 
 # Devtree - Run And Operate
 
-## Setup
+## Upgrade a 0.4 project
 
-Use the CLI in this order when bringing up a worktree instance.
+Stop every Devtree process, then run the interactive migration:
+
+```bash
+pnpm devtree upgrade
+```
+
+The Clack assistant rewrites legacy config keys, adds the primary endpoint, and
+lets the user choose which allocated ports belong to reusable dependencies. It
+backs up the config and archives old machine state under `~/.devtree/backups`.
+It never deletes Docker containers or volumes; review the reported legacy
+Compose projects before removing them.
+
+## Start a session
+
+Validate local prerequisites once, then start development:
 
 ```bash
 pnpm devtree doctor --fix
-pnpm devtree setup
 pnpm devtree dev
 ```
 
-Use `pnpm devtree setup --interactive` once when the repository needs guided Caddy and Tailscale proxy configuration. It writes `.devtree.yml` and ignored `.devtree.local.yml`; ordinary `setup` stays non-interactive.
+The main checkout becomes session `default` and owns its dependency stack. A
+linked worktree derives a session name from its branch and reuses `default`.
+`dev` starts owned Compose dependencies, waits for health, runs first-time setup
+hooks when needed, registers every endpoint route, and launches Vite.
 
-Then inspect the assigned URL and names.
+Use the Clack startup flow when the identity or dependency choice should be
+confirmed interactively:
+
+```bash
+pnpm devtree dev -i
+```
+
+Use deterministic flags in scripts and automation:
+
+```bash
+pnpm devtree dev --name feature-x
+pnpm devtree dev --deps default
+pnpm devtree dev --deps reporting
+pnpm devtree dev -d
+pnpm devtree dev --name reporting -d
+pnpm devtree dev -- --open
+```
+
+`--deps <name>` reuses a registered stack. Bare `--deps` and `-d` make the
+session own an isolated stack. A second live session cannot use the same project
+and session name because that would steal its endpoint routes.
+
+## Inspect runtime state
+
+Inspect the current checkout's resolved project, session, dependency owner, and
+all endpoints:
 
 ```bash
 pnpm devtree info
+pnpm devtree info --name feature-x --deps default
 ```
 
-List all running Devtree environments from any directory.
+List every live Devtree session from any directory:
 
 ```bash
 pnpx devtree list
 pnpx devtree list --json
 ```
 
-For cleanup and dependency inspection:
+The table includes project, session, status, dependency owner, primary URL, and
+worktree path. JSON also includes all endpoints and process identifiers.
+
+## Manage dependencies safely
+
+Only a dependency owner may mutate its stack:
+
+```bash
+pnpm devtree deps start
+pnpm devtree deps stop
+```
+
+A consumer may follow Compose logs because its dependency scope resolves to the
+owner's project:
 
 ```bash
 pnpm devtree deps logs
-pnpm devtree gc --dry-run
 ```
 
-## Core Patterns
+If a reused stack is missing, start the owner session or restart the consumer
+with `-d`. Do not silently fall back to a new stack; that changes data and service
+identity underneath the application.
 
-### Verify health with doctor first
-
-```bash
-pnpm devtree doctor --fix
-```
-
-Use `doctor` as the first check; it validates local prerequisites and bootstraps `portless` when needed.
-
-### Bring up dependencies before the dev server
+Use explicit setup from the owner when hooks must be rerun:
 
 ```bash
 pnpm devtree setup
-pnpm devtree dev
 ```
 
-`setup` writes env overrides, starts configured dependencies, and runs setup hooks before `dev` starts the app.
+Consumers cannot run setup, migrations, start, or stop against another session's
+stack.
 
-### Inspect the current instance URL and names
+## Routing and remote access
+
+Portless is the default. Devtree creates an alias for every endpoint and removes
+only those aliases when the session exits.
+
+For Caddy and Tailscale proxy configuration, run the setup wizard once:
 
 ```bash
-pnpm devtree info
+pnpm devtree setup --interactive
 ```
 
-`info` prints the exact local and Tailscale application URLs, required hostname and port, active Serve mapping, routing provider, app name, instance ID, scoped name, worktree identity, env provider, env file, and Compose project names. Persisted routing state keeps this output stable in a fresh shell.
-
-Use `pnpx devtree list` outside a checkout to inspect every live Devtree session on the machine. It reports the worktree path, URL, controller PID, and development-runner PID. Projects with `registry.enabled: false` in `.devtree.yml` are deliberately omitted.
-
-In Tailscale proxy mode, `doctor` checks Caddy, hostname resolution, Tailscale connectivity, and the shared raw TCP Serve mapping. `doctor --fix`, `setup`, and `dev` reconcile that mapping idempotently without resetting or changing unrelated Serve routes. Vite remains on `127.0.0.1`.
-
-Inspect or explicitly remove only the Devtree-owned mapping with:
+Inspect or remove only Devtree's persisted Tailscale mapping:
 
 ```bash
 pnpm devtree tailscale status
 pnpm devtree tailscale remove
 ```
 
-### Clean up orphaned Docker resources safely
+Do not start Vite directly. That skips managed environment values, stable port
+allocation, session registration, and endpoint aliases.
+
+## Garbage collection
+
+Preview first:
 
 ```bash
 pnpm devtree gc --dry-run
 pnpm devtree gc
 ```
 
-Dry-run first, then remove orphaned dependency resources created by deleted worktrees.
+Garbage collection removes dependency resources whose owner worktree is gone. It
+keeps stacks used by live sessions even if the original owner worktree has been
+deleted, and it skips resources without enough Devtree metadata.
 
-## Common Mistakes
+## Troubleshooting order
 
-### CRITICAL Start Vite directly instead of devtree
-
-Wrong:
-
-```json
-{
-  "scripts": {
-    "dev": "vp dev"
-  }
-}
-```
-
-```bash
-pnpm dev
-```
-
-Correct:
-
-```json
-{
-  "scripts": {
-    "devtree": "devtree"
-  }
-}
-```
-
-```bash
-pnpm devtree dev
-```
-
-Starting raw Vite skips devtree's portless wrapping and runtime env injection, so multi-worktree isolation disappears.
-
-Source: `README.md`, `src/command-builder.ts:17`
-
-### HIGH Disable portless and expect APP_URL to exist
-
-Wrong:
-
-```bash
-PORTLESS=0 pnpm devtree dev
-```
-
-Correct:
-
-```bash
-BETTER_AUTH_URL=http://localhost:3000 PORTLESS=0 pnpm devtree dev
-```
-
-When portless is disabled, devtree does not inject the public URL, so callback-based auth flows need an explicit fallback URL.
-
-Source: `src/cli.ts:499`
-
-### HIGH Skip setup when dependencies or hooks matter
-
-Wrong:
-
-```bash
-pnpm devtree dev
-```
-
-Correct:
-
-```bash
-pnpm devtree setup
-pnpm devtree dev
-```
-
-`dev` starts the app, but `setup` is what starts dependencies and runs `setup`, `migrate`, and `post_setup` hooks.
-
-Source: `README.md`, `src/cli.ts:448`
-
-### MEDIUM Assume gc removes unknown docker projects
-
-Wrong:
-
-```bash
-pnpm devtree gc
-```
-
-Correct:
-
-```bash
-pnpm devtree gc --dry-run
-```
-
-Unknown projects without worktree metadata are reported and skipped, so `gc` is not a universal Docker janitor.
-
-Source: `src/gc.ts:356`
-
-### HIGH Tension: portless compatibility versus public URL correctness
-
-Disabling portless can simplify local bootstrapping in odd environments, but it removes the stable public URL contract that devtree normally provides. Agents that take the shortcut need to replace that URL explicitly.
-
-See also: `devtree-set-up-devtree` - setup choices around portless and env injection decide whether runtime URLs work.
-
-See also: `devtree-set-up-devtree` - configuration drives most runtime failures.
+1. Run `pnpm devtree info` to confirm the resolved identities and endpoints.
+2. Run `pnpm devtree doctor` to check Git, Vite, routing, Docker, and Tailscale.
+3. Run `pnpx devtree list` to detect an existing session with the same name.
+4. If reuse fails, confirm the owner appears in the dependency registry by
+   starting its session once.
+5. Use `pnpm devtree dev -d` only when an isolated dependency stack is actually
+   intended.
+6. Run `pnpm devtree gc --dry-run` before removing stale Docker resources.

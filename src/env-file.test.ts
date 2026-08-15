@@ -11,8 +11,7 @@ import type { Loaded_devtree_config } from "./config.ts";
 function create_loaded_config(repo_root: string): Loaded_devtree_config {
   return {
     config: {
-      app_name: "demo-app",
-      namespace: "demo-app",
+      project_name: "demo-app",
       env: {
         provider: "dotenv",
         managed_block_id: "test managed env",
@@ -39,9 +38,9 @@ describe("ensure_env_file", () => {
     const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-env-test-"));
     const loaded_config: Loaded_devtree_config = {
       config: {
-        app_name: "web-ui",
+        project_name: "web-ui",
         portless: {
-          hostname: ({ app_name }) => `${app_name}.developer.dev.example.com`,
+          hostname: ({ project_name }) => `${project_name}.developer.dev.example.com`,
         },
         env: {
           provider: "dotenv",
@@ -61,9 +60,7 @@ describe("ensure_env_file", () => {
     const instance = create_devtree_instance(loaded_config);
     const result = ensure_env_file(loaded_config, instance);
 
-    expect(result.managed_env_values.APP_URL).toBe(
-      "http://web-ui.developer.dev.example.com:1355",
-    );
+    expect(result.managed_env_values.APP_URL).toBe("http://web-ui.developer.dev.example.com:1355");
 
     rmSync(repo_root, { force: true, recursive: true });
   });

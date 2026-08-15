@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 
 import type { Loaded_devtree_config } from "./config.ts";
+import { list_environment_sessions } from "./environment-registry.ts";
 import type { Devtree_instance } from "./instance.ts";
 import { list_registered_compose_projects, unregister_compose_project } from "./registry.ts";
 import { run_command_capture, run_command_inherit } from "./process.ts";
@@ -153,13 +154,8 @@ function seed_projects_from_registry(
   projects: Map<string, Project_resources>,
   instance: Devtree_instance,
 ) {
-  for (const entry of list_registered_compose_projects(instance.registry_namespace)) {
-    ensure_project_entry(
-      projects,
-      entry.compose_project,
-      entry.registry_namespace,
-      entry.worktree_path,
-    );
+  for (const entry of list_registered_compose_projects(instance.project_name)) {
+    ensure_project_entry(projects, entry.compose_project, entry.project_name, entry.worktree_path);
   }
 }
 
@@ -312,13 +308,32 @@ function remove_containers(names: string[]) {
 export function classify_projects(
   projects: Project_resources[],
   active_worktrees: Set<string>,
+  protected_project_names = new Set<string>(),
 ): Classified_projects {
+  const is_active = (project: Project_resources) =>
+    protected_project_names.has(project.project_name) ||
+    is_active_worktree(project, active_worktrees);
+
   return {
-    active_projects: projects.filter((project) => is_active_worktree(project, active_worktrees)),
-    orphan_projects: projects.filter(
-      (project) => project.worktree_path && !is_active_worktree(project, active_worktrees),
-    ),
-    unknown_projects: projects.filter((project) => !project.worktree_path),
+    active_projects: projects.filter(is_active),
+    orphan_projects: projects.filter((project) => project.worktree_path && !is_active(project)),
+    unknown_projects: projects.filter((project) => !project.worktree_path && !is_active(project)),
+  };
+}
+
+function get_live_consumer_projects(instance: Devtree_instance) {
+  const live_dependency_owners = new Set(
+    list_environment_sessions()
+      .filter((session) => session.project_name === instance.project_name)
+      .map((session) => session.dependency_owner),
+  );
+  const compose_projects = list_registered_compose_projects(instance.project_name)
+    .filter((entry) => live_dependency_owners.has(entry.dependency_owner))
+    .map((entry) => entry.compose_project);
+
+  return {
+    live_dependency_owner_count: live_dependency_owners.size,
+    protected_project_names: new Set(compose_projects),
   };
 }
 
@@ -328,6 +343,7 @@ export function run_gc(
   options: Gc_options,
 ) {
   const active_worktrees = read_git_worktree_paths();
+  const live_consumers = get_live_consumer_projects(instance);
   const projects = read_container_projects(instance);
 
   seed_projects_from_registry(projects, instance);
@@ -338,11 +354,16 @@ export function run_gc(
   const all_projects = [...projects.values()].sort((left, right) =>
     left.project_name.localeCompare(right.project_name),
   );
-  const classified_projects = classify_projects(all_projects, active_worktrees);
+  const classified_projects = classify_projects(
+    all_projects,
+    active_worktrees,
+    live_consumers.protected_project_names,
+  );
 
   console.log("Devtree dependency garbage collection");
   console.log(`Config: ${loaded_config.config_path}`);
   console.log(`Active git worktrees: ${active_worktrees.size}`);
+  console.log(`Live dependency owners: ${live_consumers.live_dependency_owner_count}`);
   console.log(`Managed Docker projects: ${all_projects.length}`);
 
   if (options.verbose && classified_projects.active_projects.length > 0) {
@@ -385,7 +406,7 @@ export function run_gc(
     remove_containers(project.containers);
     remove_named_objects("network", project.networks);
     remove_named_objects("volume", project.volumes);
-    unregister_compose_project(instance.registry_namespace, project.project_name);
+    unregister_compose_project(instance.project_name, project.project_name);
   }
 
   console.log("");

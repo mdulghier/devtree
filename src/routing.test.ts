@@ -6,7 +6,7 @@ import { resolve_routing } from "./routing.ts";
 
 function create_config(): Devtree_config {
   return {
-    app_name: "web-ui",
+    project_name: "web-ui",
     env: {
       provider: "dotenv",
       entries: () => [],
@@ -30,7 +30,7 @@ describe("resolve_routing", () => {
     const config = create_config();
 
     config.portless = {
-      hostname: ({ app_name }) => `${app_name}.alice.dev.example.com`,
+      hostname: ({ project_name }) => `${project_name}.alice.dev.example.com`,
       bootstrap: "manual",
     };
 
@@ -50,8 +50,8 @@ describe("resolve_routing", () => {
 
   test("resolves the Caddy provider from the new routing configuration", () => {
     const config = create_config();
-    const hostname = ({ app_name }: { app_name: string }) =>
-      `${app_name}.alice.dev.example.com`;
+    const hostname = ({ project_name }: { project_name: string }) =>
+      `${project_name}.alice.dev.example.com`;
 
     config.routing = {
       provider: {

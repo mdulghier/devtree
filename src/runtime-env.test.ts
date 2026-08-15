@@ -8,9 +8,9 @@ import type { Resolved_tailscale } from "./tailscale.ts";
 function create_instance() {
   const loaded_config: Loaded_devtree_config = {
     config: {
-      app_name: "web-ui",
+      project_name: "web-ui",
       portless: {
-        hostname: ({ app_name }) => `${app_name}.developer.dev.example.com`,
+        hostname: ({ project_name }) => `${project_name}.developer.dev.example.com`,
       },
       env: {
         provider: "dotenv",
@@ -40,25 +40,20 @@ function create_tailscale(mode: Resolved_tailscale["mode"]): Resolved_tailscale 
 describe("create_runtime_env", () => {
   test("injects the canonical public hostname, URL, and proxy mode", () => {
     const instance = create_instance();
-    const runtime_env = create_runtime_env(
-      instance,
-      {},
-      create_tailscale("proxy"),
-    );
+    const runtime_env = create_runtime_env(instance, {}, create_tailscale("proxy"));
 
     expect(runtime_env.DEVTREE_PUBLIC_HOSTNAME).toBe("web-ui.developer.dev.example.com");
     expect(runtime_env.DEVTREE_PUBLIC_URL).toBe("http://web-ui.developer.dev.example.com:1355");
+    expect(runtime_env.DEVTREE_PROJECT_NAME).toBe("web-ui");
+    expect(runtime_env.DEVTREE_SESSION_NAME).toBe("default");
+    expect(runtime_env.DEVTREE_DEPENDENCY_OWNER).toBe("default");
     expect(runtime_env.DEVTREE_ROUTING_PROVIDER).toBe("portless");
     expect(runtime_env.DEVTREE_TAILSCALE_MODE).toBe("proxy");
     expect(runtime_env.DEVTREE_TAILSCALE_HOST).toBeUndefined();
   });
 
   test("retains the MagicDNS host in legacy direct mode", () => {
-    const runtime_env = create_runtime_env(
-      create_instance(),
-      {},
-      create_tailscale("direct"),
-    );
+    const runtime_env = create_runtime_env(create_instance(), {}, create_tailscale("direct"));
 
     expect(runtime_env.DEVTREE_TAILSCALE_HOST).toBe("devbox.example.ts.net");
   });
@@ -82,9 +77,7 @@ describe("create_runtime_env", () => {
       },
     );
 
-    expect(runtime_env.DEVTREE_TAILSCALE_URL).toBe(
-      "http://web-ui.developer.dev.example.com:2468",
-    );
+    expect(runtime_env.DEVTREE_TAILSCALE_URL).toBe("http://web-ui.developer.dev.example.com:2468");
     expect(runtime_env.DEVTREE_TAILSCALE_APPLICATION_PORT).toBe("2468");
   });
 });

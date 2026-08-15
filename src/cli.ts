@@ -15,24 +15,20 @@ import {
   remove_caddy_route,
 } from "./caddy.ts";
 import { ensure_caddy_process } from "./caddy-process.ts";
-import { load_devtree_config } from "./config.ts";
+import { find_devtree_config, load_devtree_config } from "./config.ts";
 import { format_config_value, get_config_value, set_config_value } from "./config-command.ts";
 import {
   build_development_command,
   get_dev_server_command,
   type Dev_server_runner,
 } from "./command-builder.ts";
-import {
-  get_proxy_mode_configuration_error,
-  is_proxy_tailscale_mode,
-} from "./doctor.ts";
+import { get_proxy_mode_configuration_error, is_proxy_tailscale_mode } from "./doctor.ts";
 import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
+import { format_environment_list, format_environment_list_json } from "./environment-list.ts";
 import {
-  format_environment_list,
-  format_environment_list_json,
-} from "./environment-list.ts";
-import {
+  assert_environment_session_available,
   create_environment_session,
+  list_dependency_stack_sessions,
   list_environment_sessions,
   remove_environment_session,
   set_environment_session_runner_pid,
@@ -49,7 +45,7 @@ import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
 import { format_routing_info_lines } from "./info.ts";
 import { run_interactive_setup } from "./interactive-setup.ts";
 import { resolve_portless_https, resolve_portless_port } from "./hostname.ts";
-import { get_portless_compatibility_error } from "./portless.ts";
+import { get_portless_alias_add_args, get_portless_alias_remove_args } from "./portless.ts";
 import {
   command_exists,
   run_command_capture,
@@ -57,13 +53,18 @@ import {
   run_command_inherit_async,
   type Run_command_options,
 } from "./process.ts";
-import { register_compose_project } from "./registry.ts";
+import {
+  list_registered_compose_projects,
+  register_compose_project,
+  unregister_compose_project,
+} from "./registry.ts";
 import {
   get_persisted_active_tailscale_routing,
   type Active_tailscale_routing,
 } from "./routing-state.ts";
-import { has_configured_routing_hostname, resolve_routing } from "./routing.ts";
+import { resolve_routing } from "./routing.ts";
 import { create_runtime_env } from "./runtime-env.ts";
+import { parse_session_options, resolve_session_instance } from "./session-options.ts";
 import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
 import { validate_tailscale_hostname } from "./tailscale-dns.ts";
 import {
@@ -73,6 +74,7 @@ import {
   remove_owned_tailscale_serve,
   resolve_tailscale_serve_port,
 } from "./tailscale-serve.ts";
+import { run_upgrade_command } from "./upgrade.ts";
 
 type Command_name =
   | "config"
@@ -86,7 +88,8 @@ type Command_name =
   | "info"
   | "list"
   | "setup"
-  | "tailscale";
+  | "tailscale"
+  | "upgrade";
 
 type Runtime_state = {
   loaded_config: Loaded_devtree_config;
@@ -104,12 +107,13 @@ function print_help() {
   console.log("Commands:");
   console.log("  doctor [--fix]          Check local prerequisites, routing, and Tailscale");
   console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
-  console.log("  info                    Print the current instance URLs and resource names");
+  console.log("  info [session options]  Print resolved URLs and resource names");
   console.log("  list [--json]           List running Devtree environments on this machine");
   console.log("  tailscale status|remove Inspect or safely remove Devtree's Serve mapping");
-  console.log("  hosts                   Print hosts-file entries for this checkout");
+  console.log("  hosts [session options] Print endpoint hosts-file entries");
   console.log("  setup [--interactive]   Configure Devtree, sync env, and start dependencies");
-  console.log("  dev [-- <vite args>]    Start the app through Devtree routing");
+  console.log("  upgrade                 Upgrade a Devtree 0.4 project interactively");
+  console.log("  dev [-i] [--name NAME] [--deps [OWNER] | -d] [-- <vite args>]");
   console.log("  deps start|stop|logs    Manage configured dependencies");
   console.log("  gc [--dry-run] [-v]     Remove orphaned dependency resources");
   console.log("  env write|show          Compatibility aliases for env sync and info");
@@ -120,12 +124,7 @@ function get_command_name(argv: string[]) {
 }
 
 function get_portless_start_args(loaded_config: Loaded_devtree_config) {
-  const args = [
-    "proxy",
-    "start",
-    "--port",
-    String(resolve_portless_port(loaded_config.config)),
-  ];
+  const args = ["proxy", "start", "--port", String(resolve_portless_port(loaded_config.config))];
 
   args.push(resolve_portless_https(loaded_config.config) ? "--https" : "--no-tls");
 
@@ -178,12 +177,13 @@ function run_process(
   });
 }
 
-function get_runtime_state(loaded_config: Loaded_devtree_config) {
-  const instance = create_devtree_instance(loaded_config);
+function get_runtime_state(
+  loaded_config: Loaded_devtree_config,
+  instance = create_devtree_instance(loaded_config),
+) {
   const env_result = ensure_env_file(loaded_config, instance);
   const tailscale = resolve_tailscale(loaded_config.config);
-  const persisted_tailscale_routing =
-    get_persisted_active_tailscale_routing(instance);
+  const persisted_tailscale_routing = get_persisted_active_tailscale_routing(instance);
   const active_tailscale_routing =
     tailscale.node_id &&
     persisted_tailscale_routing &&
@@ -231,6 +231,7 @@ function get_command_context(runtime_state: Runtime_state): Command_spec_context
   return {
     config: runtime_state.loaded_config.config,
     instance: runtime_state.instance,
+    dependencies: runtime_state.instance.dependencies,
     repo_root: runtime_state.loaded_config.repo_root,
     managed_env_values: runtime_state.managed_env_values,
     effective_env_values: runtime_state.effective_env_values,
@@ -248,7 +249,7 @@ function resolve_compose_project_name(
   context: Command_spec_context,
 ) {
   if (!dependency.project_name) {
-    return context.instance.get_scoped_name(dependency.name);
+    return context.dependencies.get_scoped_name(dependency.name);
   }
 
   return typeof dependency.project_name === "function"
@@ -266,7 +267,8 @@ function resolve_compose_env(dependency: Compose_dependency, context: Command_sp
     ...compose_env,
     DOCKER_COMPOSE_PROJECT: compose_project,
     WORKTREE_PATH: context.instance.worktree_path,
-    DEVTREE_NAMESPACE: context.instance.registry_namespace,
+    DEVTREE_PROJECT_NAME: context.instance.project_name,
+    DEVTREE_DEPENDENCY_OWNER: context.instance.dependency_owner,
     DEVTREE_LABEL_PREFIX: context.instance.label_prefix,
   };
 }
@@ -285,13 +287,6 @@ function run_compose_dependency(
   const compose_env = resolve_compose_env(dependency, context);
   const compose_args = ["compose", "-f", compose_file_path, "--project-name", compose_project];
 
-  register_compose_project({
-    registry_namespace: runtime_state.instance.registry_namespace,
-    compose_project,
-    worktree_path: runtime_state.instance.worktree_path,
-    dependency_name: dependency.name,
-  });
-
   if (subcommand === "start") {
     run_process(
       [
@@ -308,6 +303,13 @@ function run_compose_dependency(
         env: compose_env,
       },
     );
+    register_compose_project({
+      project_name: runtime_state.instance.project_name,
+      dependency_owner: runtime_state.instance.dependency_owner,
+      compose_project,
+      worktree_path: runtime_state.instance.worktree_path,
+      dependency_name: dependency.name,
+    });
     return;
   }
 
@@ -316,6 +318,7 @@ function run_compose_dependency(
       use_varlock: false,
       env: compose_env,
     });
+    unregister_compose_project(runtime_state.instance.project_name, compose_project);
     return;
   }
 
@@ -369,19 +372,6 @@ function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix 
     );
   }
 
-  if (has_configured_routing_hostname(loaded_config.config)) {
-    const help_result = run_command_capture("portless", ["run", "--help"], {
-      allow_failure: true,
-    });
-    const compatibility_error = get_portless_compatibility_error(
-      `${help_result.stdout}\n${help_result.stderr}`,
-    );
-
-    if (compatibility_error) {
-      throw new Error(compatibility_error);
-    }
-  }
-
   if (loaded_config.config.portless?.bootstrap === "manual") {
     return;
   }
@@ -401,10 +391,7 @@ function ensure_portless_ready(loaded_config: Loaded_devtree_config, should_fix 
   run_command_capture("portless", get_portless_start_args(loaded_config), { allow_failure: true });
 }
 
-async function ensure_routing_ready(
-  loaded_config: Loaded_devtree_config,
-  should_fix = true,
-) {
+async function ensure_routing_ready(loaded_config: Loaded_devtree_config, should_fix = true) {
   const routing = resolve_routing(loaded_config.config);
 
   if (!routing.enabled) {
@@ -430,10 +417,7 @@ async function ensure_routing_ready(
 function get_tailscale_serve_port(loaded_config: Loaded_devtree_config) {
   const routing = resolve_routing(loaded_config.config);
 
-  return resolve_tailscale_serve_port(
-    loaded_config.config.tailscale?.serve_port,
-    routing.port,
-  );
+  return resolve_tailscale_serve_port(loaded_config.config.tailscale?.serve_port, routing.port);
 }
 
 function require_proxy_tailscale(runtime_state: Runtime_state) {
@@ -460,10 +444,12 @@ async function ensure_tailscale_proxy_ready(runtime_state: Runtime_state) {
 
   require_proxy_tailscale(runtime_state);
 
-  await validate_tailscale_hostname(
-    runtime_state.instance.public_hostname,
-    runtime_state.tailscale.ipv4 as string,
-  );
+  for (const endpoint of Object.values(runtime_state.instance.endpoints)) {
+    await validate_tailscale_hostname(
+      endpoint.public_hostname,
+      runtime_state.tailscale.ipv4 as string,
+    );
+  }
 
   const routing = resolve_routing(runtime_state.loaded_config.config);
 
@@ -489,10 +475,22 @@ function print_application_urls(runtime_state: Runtime_state) {
       console.log(`Local URL: ${active_tailscale_routing.local_url}`);
     }
 
+    for (const endpoint of Object.values(runtime_state.instance.endpoints)) {
+      if (!endpoint.primary) {
+        console.log(`${endpoint.name}: ${endpoint.public_url}`);
+      }
+    }
+
     return;
   }
 
   console.log(`Open ${runtime_state.instance.public_url}`);
+
+  for (const endpoint of Object.values(runtime_state.instance.endpoints)) {
+    if (!endpoint.primary) {
+      console.log(`${endpoint.name}: ${endpoint.public_url}`);
+    }
+  }
 }
 
 function resolve_require_from_root(repo_root: string) {
@@ -513,10 +511,7 @@ function ensure_proxy_mode_configuration(
   loaded_config: Loaded_devtree_config,
   instance: Devtree_instance,
 ) {
-  const configuration_error = get_proxy_mode_configuration_error(
-    loaded_config.config,
-    instance,
-  );
+  const configuration_error = get_proxy_mode_configuration_error(loaded_config.config, instance);
 
   if (configuration_error) {
     throw new Error(configuration_error);
@@ -574,9 +569,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
         try {
           ensure_portless_ready(loaded_config, fix);
           routing_ready = true;
-          console.log(
-            fix ? "[pass] portless ready (bootstrapped)" : "[pass] portless reachable",
-          );
+          console.log(fix ? "[pass] portless ready (bootstrapped)" : "[pass] portless reachable");
         } catch (error) {
           issues.push(error instanceof Error ? error.message : String(error));
         }
@@ -607,22 +600,22 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   } else if (is_proxy_tailscale_mode(tailscale.mode)) {
     if (!tailscale.connected || !tailscale.ipv4 || !tailscale.node_id) {
       issues.push(
-        tailscale.error ??
-          "Tailscale proxy mode requires a connected client with an IPv4 address",
+        tailscale.error ?? "Tailscale proxy mode requires a connected client with an IPv4 address",
       );
     } else if (instance) {
       try {
-        const dns_resolution = await validate_tailscale_hostname(
-          instance.public_hostname,
-          tailscale.ipv4,
+        const dns_resolutions = await Promise.all(
+          Object.values(instance.endpoints).map((endpoint) =>
+            validate_tailscale_hostname(endpoint.public_hostname, tailscale.ipv4!),
+          ),
         );
         const routing = resolve_routing(loaded_config.config);
         const serve_port = get_tailscale_serve_port(loaded_config);
 
         console.log(
-          dns_resolution === "tailnet"
-            ? `[pass] tailnet hostname ${instance.public_hostname} -> ${tailscale.ipv4}`
-            : `[pass] local hosts entry ${instance.public_hostname} -> loopback; remote machines must map it to ${tailscale.ipv4}`,
+          dns_resolutions.every((resolution) => resolution === "tailnet")
+            ? `[pass] ${dns_resolutions.length} tailnet endpoint hostname(s) -> ${tailscale.ipv4}`
+            : `[pass] ${dns_resolutions.length} local endpoint hosts entry or entries -> loopback; remote machines must map them to ${tailscale.ipv4}`,
         );
 
         if (!routing_ready) {
@@ -653,9 +646,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
               `Tailscale Serve port ${serve_port} must forward raw TCP to tcp://${inspection.target}; found ${describe_tailscale_serve_status(inspection.status)}. Run \`pnpm devtree doctor --fix\`.`,
             );
           } else {
-            console.log(
-              `[pass] tailscale Serve tcp:${serve_port} -> ${inspection.target}`,
-            );
+            console.log(`[pass] tailscale Serve tcp:${serve_port} -> ${inspection.target}`);
           }
         }
       } catch (error) {
@@ -726,9 +717,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
 }
 
 function print_info(runtime_state: Runtime_state) {
-  const configured_tailscale_port = is_proxy_tailscale_mode(
-    runtime_state.tailscale.mode,
-  )
+  const configured_tailscale_port = is_proxy_tailscale_mode(runtime_state.tailscale.mode)
     ? get_tailscale_serve_port(runtime_state.loaded_config)
     : resolve_routing(runtime_state.loaded_config.config).port;
 
@@ -741,11 +730,15 @@ function print_info(runtime_state: Runtime_state) {
     console.log(line);
   }
 
-  console.log(`App name: ${runtime_state.instance.app_name}`);
+  console.log(`Project: ${runtime_state.instance.project_name}`);
+  console.log(`Session: ${runtime_state.instance.session_name}`);
+  console.log(
+    `Dependencies: ${runtime_state.instance.dependencies.owns ? "self" : runtime_state.instance.dependency_owner}`,
+  );
   console.log(`Instance ID: ${runtime_state.instance.instance_id}`);
   console.log(`Scoped name: ${runtime_state.instance.scoped_name}`);
   console.log(`Worktree path: ${runtime_state.instance.worktree_path}`);
-  console.log(`Worktree slug: ${runtime_state.instance.worktree_slug ?? "main checkout"}`);
+  console.log(`Branch: ${runtime_state.instance.branch_name ?? "detached"}`);
   console.log(`Routing provider: ${runtime_state.instance.routing_provider}`);
   console.log(`Routing enabled: ${runtime_state.instance.routing_enabled ? "yes" : "no"}`);
   console.log(`Portless enabled: ${runtime_state.instance.portless_enabled ? "yes" : "no"}`);
@@ -755,6 +748,12 @@ function print_info(runtime_state: Runtime_state) {
   console.log(`Tailscale mode: ${runtime_state.tailscale.mode}`);
   console.log(`Env provider: ${runtime_state.loaded_config.config.env.provider}`);
   console.log(`Env file: ${runtime_state.instance.env_file_path}`);
+
+  for (const endpoint of Object.values(runtime_state.instance.endpoints)) {
+    console.log(
+      `Endpoint (${endpoint.name}${endpoint.primary ? ", primary" : ""}): ${endpoint.public_url} -> ${endpoint.target_host}:${endpoint.target_port}`,
+    );
+  }
 
   if (runtime_state.tailscale.mode === "direct") {
     console.log(`Tailscale host: ${runtime_state.tailscale.host ?? "unavailable"}`);
@@ -767,6 +766,198 @@ function print_info(runtime_state: Runtime_state) {
     );
     console.log(`Compose project (${dependency.name}): ${compose_project}`);
   }
+}
+
+function get_missing_dependency_names(runtime_state: Runtime_state) {
+  const registered_names = new Set(
+    list_registered_compose_projects(
+      runtime_state.instance.project_name,
+      runtime_state.instance.dependency_owner,
+    ).map((entry) => entry.dependency_name),
+  );
+
+  return get_compose_dependencies(runtime_state.loaded_config)
+    .map((dependency) => dependency.name)
+    .filter((name) => !registered_names.has(name));
+}
+
+function assert_reusable_dependencies(runtime_state: Runtime_state) {
+  if (runtime_state.instance.dependencies.owns) {
+    return;
+  }
+
+  const command_dependency = runtime_state.loaded_config.config.dependencies?.find(
+    (dependency) => dependency.kind === "command",
+  );
+
+  if (command_dependency) {
+    throw new Error(
+      `Dependency "${command_dependency.name}" is command-based and cannot be reused. Start this session with -d.`,
+    );
+  }
+
+  const missing_names = get_missing_dependency_names(runtime_state);
+
+  if (missing_names.length > 0) {
+    throw new Error(
+      `Dependency stack "${runtime_state.instance.project_name}/${runtime_state.instance.dependency_owner}" is not initialized (${missing_names.join(", ")}). Start its owner session or use -d.`,
+    );
+  }
+}
+
+function run_dependency_action(runtime_state: Runtime_state, action: "logs" | "start" | "stop") {
+  if (!runtime_state.instance.dependencies.owns) {
+    if (action !== "logs") {
+      throw new Error(
+        `Session "${runtime_state.instance.session_name}" reuses dependencies from "${runtime_state.instance.dependency_owner}" and cannot ${action} that stack.`,
+      );
+    }
+
+    const command_dependency = runtime_state.loaded_config.config.dependencies?.find(
+      (dependency) => dependency.kind === "command",
+    );
+
+    if (command_dependency) {
+      throw new Error(
+        `Dependency "${command_dependency.name}" is command-based and cannot be reused or inspected from a consumer session.`,
+      );
+    }
+  }
+
+  if (action === "stop") {
+    assert_dependency_stack_idle(runtime_state, "stop");
+  }
+
+  for (const dependency of runtime_state.loaded_config.config.dependencies ?? []) {
+    if (dependency.kind === "compose") {
+      run_compose_dependency(runtime_state, dependency, action);
+      continue;
+    }
+
+    const command_spec =
+      action === "start" ? dependency.start : action === "stop" ? dependency.stop : dependency.logs;
+
+    if (command_spec) {
+      run_command_spec(runtime_state, command_spec);
+    }
+  }
+}
+
+function assert_dependency_stack_idle(
+  runtime_state: Runtime_state,
+  action: "run setup or migrations for" | "stop",
+) {
+  const live_sessions = list_dependency_stack_sessions(
+    runtime_state.instance.project_name,
+    runtime_state.instance.dependency_owner,
+  );
+
+  if (live_sessions.length === 0) {
+    return;
+  }
+
+  const names = live_sessions.map((session) => session.session_name).join(", ");
+  throw new Error(
+    `Cannot ${action} dependency stack "${runtime_state.instance.project_name}/${runtime_state.instance.dependency_owner}" while used by live session(s): ${names}.`,
+  );
+}
+
+function prepare_dev_dependencies(runtime_state: Runtime_state) {
+  if (!runtime_state.instance.dependencies.owns) {
+    assert_reusable_dependencies(runtime_state);
+    return;
+  }
+
+  const was_initialized = get_missing_dependency_names(runtime_state).length === 0;
+
+  run_dependency_action(runtime_state, "start");
+
+  if (!was_initialized) {
+    run_hook(runtime_state, "setup");
+    run_hook(runtime_state, "migrate");
+    run_hook(runtime_state, "post_setup");
+  }
+}
+
+async function register_endpoint_routes(runtime_state: Runtime_state) {
+  const routing = resolve_routing(runtime_state.loaded_config.config);
+  const cleanups: Array<() => Promise<void> | void> = [];
+
+  async function cleanup_registered_routes() {
+    const pending_cleanups = cleanups.splice(0).reverse();
+    let first_error: unknown;
+
+    for (const cleanup of pending_cleanups) {
+      try {
+        await cleanup();
+      } catch (error) {
+        first_error ??= error;
+      }
+    }
+
+    if (first_error) {
+      throw first_error;
+    }
+  }
+
+  if (!routing.enabled) {
+    return async () => {};
+  }
+
+  try {
+    for (const endpoint of Object.values(runtime_state.instance.endpoints)) {
+      if (routing.provider_kind === "portless") {
+        const result = run_command_capture(
+          "portless",
+          get_portless_alias_add_args(endpoint.public_hostname, endpoint.target_port),
+          { allow_failure: true },
+        );
+
+        if (result.status !== 0) {
+          throw new Error(
+            `Could not register Portless route ${endpoint.public_hostname}: ${result.stderr || result.stdout}`,
+          );
+        }
+
+        cleanups.push(() => {
+          run_command_capture(
+            "portless",
+            get_portless_alias_remove_args(endpoint.public_hostname),
+            { allow_failure: true },
+          );
+        });
+        continue;
+      }
+
+      if (!routing.caddy_admin_url) {
+        throw new Error("Caddy routing requires a local admin URL.");
+      }
+
+      const route_id = get_caddy_route_id(`${runtime_state.instance.instance_id}-${endpoint.name}`);
+
+      await register_caddy_route(
+        routing.caddy_admin_url,
+        create_caddy_route({
+          route_id,
+          hostname: endpoint.public_hostname,
+          upstream_port: endpoint.target_port,
+        }),
+      );
+      cleanups.push(() => remove_caddy_route(routing.caddy_admin_url!, route_id));
+    }
+  } catch (error) {
+    try {
+      await cleanup_registered_routes();
+    } catch (cleanup_error) {
+      console.warn(
+        `[devtree] Could not roll back every endpoint route: ${cleanup_error instanceof Error ? cleanup_error.message : String(cleanup_error)}`,
+      );
+    }
+
+    throw error;
+  }
+
+  return cleanup_registered_routes;
 }
 
 async function main() {
@@ -794,12 +985,19 @@ async function main() {
     return;
   }
 
+  if (command_name === "upgrade") {
+    if (argv.length !== 1) {
+      throw new Error("Usage: devtree upgrade");
+    }
+
+    const { config_path, repo_root } = find_devtree_config();
+    await run_upgrade_command(repo_root, config_path);
+    return;
+  }
+
   let loaded_config = await load_devtree_config();
 
-  if (
-    command_name === "setup" &&
-    (argv.includes("--interactive") || argv.includes("-i"))
-  ) {
+  if (command_name === "setup" && (argv.includes("--interactive") || argv.includes("-i"))) {
     const setup_result = await run_interactive_setup(loaded_config);
 
     if (!setup_result.configured) {
@@ -840,11 +1038,25 @@ async function main() {
   }
 
   if (command_name === "hosts") {
-    const instance = create_devtree_instance(loaded_config);
+    const parsed_options = parse_session_options(argv.slice(1));
 
-    if (is_localhost_hostname(instance.public_hostname)) {
+    if (parsed_options.interactive) {
+      throw new Error("Interactive session selection is available through `devtree dev -i`.");
+    }
+
+    const instance = await resolve_session_instance(loaded_config, parsed_options);
+
+    if (!instance) {
+      return;
+    }
+
+    const public_hostnames = Object.values(instance.endpoints)
+      .map((endpoint) => endpoint.public_hostname)
+      .filter((hostname) => !is_localhost_hostname(hostname));
+
+    if (public_hostnames.length === 0) {
       console.log(
-        `${instance.public_hostname} is a local-only hostname and does not need a hosts-file entry.`,
+        "Every endpoint uses a local-only hostname and does not need a hosts-file entry.",
       );
       console.log(
         "Configure routing.hostname with a custom domain before sharing the application with another machine.",
@@ -852,18 +1064,34 @@ async function main() {
       return;
     }
 
-    console.log(format_local_hosts_section(instance.public_hostname));
+    console.log(format_local_hosts_section(public_hostnames));
     console.log("");
-    console.log(
-      format_tailscale_hosts_section(
-        instance.public_hostname,
-        resolve_tailscale_ipv4(),
-      ),
-    );
+    console.log(format_tailscale_hosts_section(public_hostnames, resolve_tailscale_ipv4()));
     return;
   }
 
-  const runtime_state = get_runtime_state(loaded_config);
+  let resolved_instance: Devtree_instance | null = null;
+  let dev_passthrough_args: string[] = [];
+
+  if (command_name === "dev" || command_name === "info") {
+    const parsed_options = parse_session_options(argv.slice(1));
+
+    if (command_name === "info" && parsed_options.interactive) {
+      throw new Error("Interactive session selection is available through `devtree dev -i`.");
+    }
+
+    dev_passthrough_args = parsed_options.passthrough_args;
+    resolved_instance = await resolve_session_instance(loaded_config, parsed_options);
+
+    if (!resolved_instance) {
+      return;
+    }
+  }
+
+  const runtime_state = get_runtime_state(
+    loaded_config,
+    resolved_instance ?? create_devtree_instance(loaded_config),
+  );
 
   if (command_name === "info") {
     console.log(runtime_state.env_status_message);
@@ -907,7 +1135,7 @@ async function main() {
         `Ownership: ${inspection.persisted_mapping?.owned ? "Devtree" : "not owned by Devtree"}`,
       );
       console.log(
-        `Recorded worktrees: ${inspection.persisted_mapping?.consumer_instance_ids.length ?? 0}`,
+        `Recorded sessions: ${inspection.persisted_mapping?.consumer_instance_ids.length ?? 0}`,
       );
       return;
     }
@@ -954,18 +1182,20 @@ async function main() {
   console.log(runtime_state.env_status_message);
 
   if (command_name === "setup") {
+    if (!runtime_state.instance.dependencies.owns) {
+      throw new Error(
+        `Session "${runtime_state.instance.session_name}" reuses dependencies from "${runtime_state.instance.dependency_owner}". Run setup from the owner or start an isolated session with devtree dev -d.`,
+      );
+    }
+
+    assert_dependency_stack_idle(runtime_state, "run setup or migrations for");
+
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);
     await ensure_tailscale_proxy_ready(runtime_state);
     print_tailscale_status(runtime_state);
 
-    for (const dependency of loaded_config.config.dependencies ?? []) {
-      if (dependency.kind === "compose") {
-        run_compose_dependency(runtime_state, dependency, "start");
-      } else {
-        run_command_spec(runtime_state, dependency.start);
-      }
-    }
+    run_dependency_action(runtime_state, "start");
 
     run_hook(runtime_state, "setup");
     run_hook(runtime_state, "migrate");
@@ -976,7 +1206,7 @@ async function main() {
     if (runtime_state.tailscale.mode === "direct" && runtime_state.tailscale.host) {
       console.log(`Tailscale hostname available to Vite: ${runtime_state.tailscale.host}`);
     }
-    console.log("Run `pnpm devtree dev` to launch the worktree-scoped dev server.");
+    console.log("Run `pnpm devtree dev` to launch the session's dev server.");
     return;
   }
 
@@ -987,29 +1217,12 @@ async function main() {
       throw new Error("Usage: devtree deps <start|stop|logs>");
     }
 
-    for (const dependency of loaded_config.config.dependencies ?? []) {
-      if (dependency.kind === "compose") {
-        run_compose_dependency(runtime_state, dependency, deps_subcommand);
-        continue;
-      }
-
-      const command_spec =
-        deps_subcommand === "start"
-          ? dependency.start
-          : deps_subcommand === "stop"
-            ? dependency.stop
-            : dependency.logs;
-
-      if (command_spec) {
-        run_command_spec(runtime_state, command_spec);
-      }
-    }
+    run_dependency_action(runtime_state, deps_subcommand);
 
     return;
   }
 
   if (command_name === "dev") {
-    const extra_args = argv.slice(1);
     const routing = resolve_routing(loaded_config.config);
 
     if (
@@ -1022,74 +1235,44 @@ async function main() {
       );
     }
 
+    assert_environment_session_available(runtime_state.instance);
+    prepare_dev_dependencies(runtime_state);
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);
     await ensure_tailscale_proxy_ready(runtime_state);
     print_tailscale_status(runtime_state);
     run_hook(runtime_state, "pre_dev");
 
-    const vite_port =
-      routing.provider_kind === "caddy"
-        ? runtime_state.instance.allocate_port("vite", 5173)
-        : undefined;
-    const caddy_route_id =
-      routing.provider_kind === "caddy"
-        ? get_caddy_route_id(runtime_state.instance.instance_id)
-        : null;
+    const dev_server_endpoint = Object.values(runtime_state.instance.endpoints).find(
+      (endpoint) => endpoint.target_kind === "dev-server",
+    );
+
+    if (!dev_server_endpoint) {
+      throw new Error("No dev-server endpoint was resolved.");
+    }
+
     const development_command = build_development_command({
-      app_name: runtime_state.instance.app_name,
-      public_hostname: runtime_state.instance.public_hostname,
-      portless_exact_hostname: has_configured_routing_hostname(loaded_config.config),
-      extra_args,
-      portless_enabled: runtime_state.instance.portless_enabled,
+      extra_args: dev_passthrough_args,
       routing_provider: routing.provider_kind,
       runner: get_dev_server_runner(loaded_config),
-      vite_host:
-        routing.provider_kind === "portless" &&
-        runtime_state.tailscale.mode === "direct" &&
-        runtime_state.tailscale.host
-          ? "0.0.0.0"
-          : "127.0.0.1",
-      vite_port,
+      vite_host: "127.0.0.1",
+      vite_port: dev_server_endpoint.target_port,
       use_varlock: loaded_config.config.env.provider === "varlock",
     });
     const [command, ...args] = development_command;
 
-    if (
-      routing.provider_kind === "caddy" &&
-      routing.caddy_admin_url &&
-      vite_port !== undefined &&
-      caddy_route_id
-    ) {
-      await register_caddy_route(
-        routing.caddy_admin_url,
-        create_caddy_route({
-          route_id: caddy_route_id,
-          hostname: runtime_state.instance.public_hostname,
-          upstream_port: vite_port,
-        }),
-      );
-      console.log(
-        `[devtree] Caddy route ${runtime_state.instance.public_hostname} -> 127.0.0.1:${vite_port}`,
-      );
-    }
-
-    print_application_urls(runtime_state);
-
     let exit_status = 0;
     let environment_session: Environment_session | null = null;
+    let cleanup_routes: () => Promise<void> = async () => {};
 
     if (loaded_config.config.registry?.enabled !== false) {
-      try {
-        environment_session = create_environment_session(runtime_state.instance);
-      } catch (error) {
-        console.warn(
-          `[devtree] Could not register this environment: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+      environment_session = create_environment_session(runtime_state.instance);
     }
 
     try {
+      cleanup_routes = await register_endpoint_routes(runtime_state);
+      print_application_urls(runtime_state);
+
       const runtime_env = create_runtime_env(
         runtime_state.instance,
         runtime_state.effective_env_values,
@@ -1121,9 +1304,7 @@ async function main() {
       });
     } finally {
       try {
-        if (routing.provider_kind === "caddy" && routing.caddy_admin_url && caddy_route_id) {
-          await remove_caddy_route(routing.caddy_admin_url, caddy_route_id);
-        }
+        await cleanup_routes();
       } finally {
         if (environment_session) {
           try {

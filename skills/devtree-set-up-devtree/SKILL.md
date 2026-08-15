@@ -1,394 +1,184 @@
 ---
 name: devtree-set-up-devtree
 description: >
-  Set up devtree in a Vite repository: install `devtree`, create
-  `devtree.config.ts`, define `env.entries`, choose `dotenv` or `varlock`,
-  register `devtree_vite_plugins`, and configure optional `dependencies`
-  and `hooks`. Load this when an agent needs to bootstrap worktree-aware
-  local development without URL, env, or Docker naming collisions.
+  Set up Devtree in a Vite repository with named projects, sessions, web
+  endpoints, reusable dependency stacks, managed environment values, and
+  optional Caddy or Tailscale routing.
 type: core
 library: devtree
-library_version: "0.4.0"
+library_version: "0.5.0"
 sources:
   - "mdulghier/devtree:README.md"
   - "mdulghier/devtree:src/config.ts"
+  - "mdulghier/devtree:src/instance.ts"
   - "mdulghier/devtree:src/cli.ts"
   - "mdulghier/devtree:src/vite.ts"
-  - "mdulghier/devtree:src/env-file.ts"
-  - "mdulghier/devtree:src/instance.ts"
 ---
 
 # Devtree - Set Up
 
-## Setup
+## Install and register Devtree
 
-Install `devtree` and register both the config file and the Vite plugin. Devtree defaults to `vite-plus`; set `dev_server.runner` to `vite` for plain Vite apps.
+Install Devtree, Portless, and the project's Vite runner:
 
 ```bash
-pnpm add -D devtree vite-plus
+pnpm add -D devtree portless vite-plus
 ```
 
-For plain Vite apps, install `vite` instead and set `dev_server.runner` to `'vite'`.
+Use `vite` instead of `vite-plus` when that is the project's runner.
+
+Create `devtree.config.ts`:
 
 ```ts
-import { define_devtree_config } from 'devtree'
+import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
-  app_name: 'my-app',
+  project_name: "my-app",
+
   dev_server: {
-    runner: 'vite-plus',
+    runner: "vite-plus",
   },
+
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
+    api: {
+      target: ({ instance }) => ({
+        kind: "port",
+        host: "127.0.0.1",
+        port: instance.allocate_port("api", 3000),
+      }),
+    },
+  },
+
   env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      {
-        kind: 'value',
-        key: 'APP_URL',
-        value: instance.public_url,
-      },
-      {
-        kind: 'value',
-        key: 'DATABASE_PORT',
-        value: String(instance.allocate_port('postgres', 5400)),
-      },
-    ],
+    provider: "dotenv",
+    entries: ({ instance, dependencies }) => {
+      const database_port = dependencies.allocate_port("postgres", 5400);
+
+      return [
+        { kind: "value", key: "APP_URL", value: instance.public_url },
+        { kind: "value", key: "API_URL", value: instance.endpoints.api.public_url },
+        { kind: "value", key: "DATABASE_PORT", value: String(database_port) },
+      ];
+    },
   },
-})
+});
 ```
 
-```ts
-import { defineConfig } from 'vite-plus'
-import { devtree_vite_plugins } from 'devtree/vite'
+Exactly one endpoint must be primary and exactly one must target the managed
+development server. Other endpoints route to loopback ports; another task runner
+or a `pre_dev` hook is responsible for starting those services.
 
-import devtree_config from './devtree.config.ts'
+Register the Vite plugin:
+
+```ts
+import { defineConfig } from "vite-plus";
+import { devtree_vite_plugins } from "devtree/vite";
+
+import devtree_config from "./devtree.config.ts";
 
 export default defineConfig({
   plugins: [...(await devtree_vite_plugins(devtree_config))],
-})
+});
 ```
 
-Plain Vite apps can import `defineConfig` from `vite` instead.
+Add scripts:
 
 ```json
 {
   "scripts": {
+    "dev": "devtree dev",
     "devtree": "devtree"
   }
 }
 ```
 
+Then validate and start the default session:
+
 ```bash
 pnpm devtree doctor --fix
-pnpm devtree setup
+pnpm devtree dev
 ```
 
-For guided Caddy and Tailscale proxy configuration, use the interactive setup instead:
+## Identity and URL model
+
+Keep project, session, endpoint, and dependency ownership separate.
+
+For project `my-app`, the default primary URL is `my-app.localhost`; its API URL
+is `api.my-app.localhost`. Session `feature-x` uses `feature-x.my-app.localhost`
+and `feature-x.api.my-app.localhost`.
+
+The main checkout defaults to session `default` and owns its dependencies. A
+linked worktree derives a session name from its branch and reuses `default`.
+Customize derived names only when repository policy requires it:
+
+```ts
+session: {
+  name: ({ branch_name, default_name }) =>
+    branch_name?.replace(/^feature\//, '') ?? default_name,
+},
+```
+
+## Dependency stacks
+
+Use the dependency scope for databases, brokers, Compose names, and their ports:
+
+```ts
+env: {
+  provider: 'dotenv',
+  entries: ({ dependencies }) => {
+    const port = dependencies.allocate_port('postgres', 5400)
+    return [
+      { kind: 'value', key: 'DATABASE_PORT', value: String(port) },
+      {
+        kind: 'value',
+        key: 'DATABASE_URL',
+        value: `postgresql://app:app@127.0.0.1:${port}/app`,
+      },
+    ]
+  },
+},
+
+dependencies: [
+  {
+    kind: 'compose',
+    name: 'services',
+    file_path: 'docker-compose.yml',
+    services: ['database'],
+  },
+],
+```
+
+Do not set a static Compose project name. The default name is scoped to the
+project and dependency owner, allowing several isolated stacks while permitting
+intentional reuse.
+
+Command dependencies cannot be reused because they have no declarative resource
+or health contract.
+
+## Caddy and Tailscale
+
+Use the Clack setup wizard once for a shared development domain:
 
 ```bash
 pnpm devtree setup --interactive
 ```
 
-It writes shared settings to committed `.devtree.yml` and the machine namespace to ignored `.devtree.local.yml`. Plain `setup` remains non-interactive.
+It writes shared routing policy to `.devtree.yml` and the machine name to ignored
+`.devtree.local.yml`. Caddy endpoint names are flattened into one DNS label so a
+single wildcard record covers named sessions and all endpoints.
 
-## Core Patterns
+## Avoid these mistakes
 
-### Keep env values instance-derived
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-      {
-        kind: 'value',
-        key: 'REDIS_PORT',
-        value: String(instance.allocate_port('redis', 6300)),
-      },
-    ],
-  },
-})
-```
-
-Use `instance.public_url`, `instance.get_scoped_name()` and `instance.allocate_port()` instead of fixed local values.
-
-For one canonical hostname that is reachable across a tailnet, prefer the interactive setup. Its shared configuration is declarative:
-
-```yaml
-# .devtree.yml
-version: 1
-routing:
-  provider: caddy
-  base_domain: dev.example.com
-  port: 1355
-  https: false
-tailscale:
-  enabled: true
-  mode: proxy
-```
-
-```yaml
-# .devtree.local.yml
-version: 1
-routing:
-  machine_name: alice
-```
-
-This produces worktree-aware hostnames such as `my-app.alice.dev.example.com` and `feature-123--my-app.alice.dev.example.com` without machine environment variables. The local file overrides the shared file and is reused by linked worktrees. `routing.hostname_suffix` supports a custom complete wildcard suffix, while the TypeScript `routing.hostname` callback remains the advanced escape hatch.
-
-### Start Docker dependencies through config
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-  dependencies: [
-    {
-      kind: 'compose',
-      name: 'postgres',
-      file_path: 'docker-compose.yml',
-      project_name: ({ instance }) => instance.get_scoped_name('db'),
-      services: ['db'],
-    },
-  ],
-})
-```
-
-Compose dependencies are the default way to give each worktree isolated container, network, and volume names.
-
-### Use hooks for repo-specific setup
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-  hooks: {
-    migrate: [
-      {
-        command: ['pnpm', 'db:migrate'],
-      },
-    ],
-    pre_dev: [
-      {
-        command: ['pnpm', 'codegen'],
-      },
-    ],
-  },
-})
-```
-
-`setup` runs `setup`, `migrate`, and `post_setup`; `dev` runs `pre_dev` before starting the server.
-
-### Turn on varlock only with its prerequisites
-
-```bash
-pnpm add -D varlock @varlock/vite-integration
-touch .env.schema
-```
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'varlock',
-    schema_path: '.env.schema',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-})
-```
-
-Keep the simple `dotenv` path as the default; use `varlock` when the repo already wants schema-based env handling.
-
-## Common Mistakes
-
-### CRITICAL Hard-code shared URLs and ports
-
-Wrong:
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: () => [
-      { kind: 'value', key: 'APP_URL', value: 'http://localhost:3000' },
-      { kind: 'value', key: 'DATABASE_PORT', value: '5432' },
-    ],
-  },
-})
-```
-
-Correct:
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-      {
-        kind: 'value',
-        key: 'DATABASE_PORT',
-        value: String(instance.allocate_port('postgres', 5400)),
-      },
-    ],
-  },
-})
-```
-
-Static values remove the per-worktree isolation that devtree is supposed to enforce.
-
-Source: `README.md`
-
-### HIGH Store manual values inside managed block
-
-Wrong:
-
-```dotenv
-# >>> devtree managed env >>>
-APP_URL=http://feature-x.my-app.localhost:1355
-STRIPE_SECRET_KEY=sk_live_manual_override
-# <<< devtree managed env <<<
-```
-
-Correct:
-
-```dotenv
-# >>> devtree managed env >>>
-APP_URL=http://feature-x.my-app.localhost:1355
-# <<< devtree managed env <<<
-
-STRIPE_SECRET_KEY=sk_live_manual_override
-```
-
-Devtree rewrites the managed block on each run and only preserves custom content outside that block.
-
-Source: `src/env-file.ts:78`
-
-### HIGH Force shared dependency project names
-
-Wrong:
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-  dependencies: [
-    {
-      kind: 'compose',
-      name: 'db',
-      project_name: 'my-app',
-    },
-  ],
-})
-```
-
-Correct:
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'dotenv',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-  dependencies: [
-    {
-      kind: 'compose',
-      name: 'db',
-      project_name: ({ instance }) => instance.get_scoped_name('db'),
-    },
-  ],
-})
-```
-
-Static Compose project names silently make multiple worktrees fight over the same Docker resources.
-
-Source: `src/cli.ts:156`
-
-### HIGH Enable varlock without integration prerequisites
-
-Wrong:
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'varlock',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-})
-```
-
-Correct:
-
-```bash
-pnpm add -D varlock @varlock/vite-integration
-touch .env.schema
-```
-
-```ts
-import { define_devtree_config } from 'devtree'
-
-export default define_devtree_config({
-  app_name: 'my-app',
-  env: {
-    provider: 'varlock',
-    schema_path: '.env.schema',
-    entries: ({ instance }) => [
-      { kind: 'value', key: 'APP_URL', value: instance.public_url },
-    ],
-  },
-})
-```
-
-`varlock` mode depends on the CLI, the schema file, and `@varlock/vite-integration`; missing any of them breaks setup or plugin loading.
-
-Source: `src/cli.ts:338`, `src/vite.ts:45`
-
-### HIGH Tension: simple setup versus explicit override freedom
-
-Devtree works best when it owns URL, env, and dependency naming. Agents trying to be “helpful” by hard-coding familiar local values usually delete the whole point of the library.
-
-See also: `devtree-run-and-operate-devtree` - runtime checks expose the fallout from setup shortcuts.
+- Do not use `app_name` or `namespace`; the configuration key is `project_name`.
+- Do not hard-code application URLs or dependency ports.
+- Do not allocate dependency ports through `instance.allocate_port`; use
+  `dependencies.allocate_port` so consumers resolve the owner's stack.
+- Do not expose two endpoints as `{ kind: 'dev-server' }`; Devtree manages one
+  Vite process per session.
+- Do not place manual secrets inside the Devtree-managed environment block.
+- Do not run raw Vite from the project's `dev` script; that bypasses Devtree's
+  identity, runtime environment, and endpoint route registration.

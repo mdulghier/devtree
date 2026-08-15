@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { Devtree_instance } from "./instance.ts";
+import type { Dependency_scope, Devtree_instance } from "./instance.ts";
 import {
   apply_devtree_yaml_config,
   load_devtree_yaml_config,
@@ -22,9 +22,21 @@ export type Managed_env_entry =
 
 export type Resolved_env_map = Record<string, string | undefined>;
 
+export type Session_name_context = {
+  project_name: string;
+  default_name: string;
+  branch_name: string | null;
+  worktree_name: string | null;
+  is_main_checkout: boolean;
+  worktree_path: string;
+};
+
 export type Routing_hostname_context = {
-  app_name: string;
-  worktree_slug: string | null;
+  project_name: string;
+  session_name: string;
+  endpoint_name: string;
+  is_primary_endpoint: boolean;
+  is_default_session: boolean;
 };
 
 export type Portless_hostname_context = Routing_hostname_context;
@@ -41,9 +53,27 @@ export type Routing_provider =
 
 export type Tailscale_mode = "direct" | "proxy" | "portless-proxy";
 
+export type Dev_server_endpoint_target = {
+  kind: "dev-server";
+};
+
+export type Port_endpoint_target = {
+  kind: "port";
+  host?: string;
+  port: number;
+};
+
+export type Endpoint_target = Dev_server_endpoint_target | Port_endpoint_target;
+
+export type Endpoint_config = {
+  primary?: boolean;
+  target: Endpoint_target | ((context: { instance: Devtree_instance }) => Endpoint_target);
+};
+
 export type Command_spec_context = {
   config: Devtree_config;
   instance: Devtree_instance;
+  dependencies: Dependency_scope;
   repo_root: string;
   managed_env_values: Record<string, string>;
   effective_env_values: Record<string, string>;
@@ -78,8 +108,11 @@ export type Command_dependency = {
 export type Devtree_dependency = Compose_dependency | Command_dependency;
 
 export type Devtree_config = {
-  app_name: string;
-  namespace?: string;
+  project_name: string;
+  session?: {
+    name?: (context: Session_name_context) => string;
+  };
+  endpoints?: Record<string, Endpoint_config>;
   registry?: {
     enabled?: boolean;
   };
@@ -113,6 +146,7 @@ export type Devtree_config = {
     entries: (context: {
       config: Devtree_config;
       instance: Devtree_instance;
+      dependencies: Dependency_scope;
       existing_env_values: Record<string, string>;
     }) => Managed_env_entry[];
   };
@@ -135,14 +169,14 @@ export function define_devtree_config(config: Devtree_config) {
   return config;
 }
 
-function find_repo_root(start_dir: string) {
+export function find_devtree_config(start_dir = process.cwd()) {
   let current_dir = resolve(start_dir);
 
   while (true) {
     const config_path = resolve(current_dir, "devtree.config.ts");
 
     if (existsSync(config_path)) {
-      return current_dir;
+      return { repo_root: current_dir, config_path };
     }
 
     const parent_dir = dirname(current_dir);
@@ -158,8 +192,7 @@ function find_repo_root(start_dir: string) {
 export async function load_devtree_config(
   start_dir = process.cwd(),
 ): Promise<Loaded_devtree_config> {
-  const repo_root = find_repo_root(start_dir);
-  const config_path = resolve(repo_root, "devtree.config.ts");
+  const { config_path, repo_root } = find_devtree_config(start_dir);
   const config_url = pathToFileURL(config_path).href;
   const imported_config = (await import(config_url)) as { default?: Devtree_config };
 

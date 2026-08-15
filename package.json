@@ -1,25 +1,25 @@
 {
   "name": "@mdulghier/devtree",
-  "version": "0.4.0",
-  "description": "Worktree-aware multi-instance dev orchestration for Vite apps.",
+  "version": "0.5.0",
+  "description": "Named development sessions, endpoint routing, and dependency stacks for Vite apps.",
   "keywords": [
     "devtree",
     "portless",
+    "tanstack-intent",
     "varlock",
     "vite",
     "vite-plus",
-    "worktree",
-    "tanstack-intent"
+    "worktree"
   ],
   "homepage": "https://github.com/mdulghier/devtree#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/mdulghier/devtree.git"
-  },
   "bugs": {
     "url": "https://github.com/mdulghier/devtree/issues"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mdulghier/devtree.git"
+  },
   "bin": {
     "devtree": "./bin/devtree.mjs"
   },
@@ -53,21 +53,22 @@
     "test": "vp test run src/*.test.ts"
   },
   "dependencies": {
+    "@clack/prompts": "^1.7.0",
     "dotenv": "^17.3.1",
     "tsx": "^4.21.0",
+    "typescript": "^5.7.2",
     "yaml": "^2.8.3"
   },
   "devDependencies": {
-    "@types/node": "^24.5.2",
     "@tanstack/intent": "^0.0.23",
-    "typescript": "^5.7.2",
+    "@types/node": "^24.5.2",
     "vite": "8.0.1",
     "vite-plus": "latest"
   },
   "peerDependencies": {
     "@varlock/vite-integration": "*",
-    "vite": "*",
     "varlock": "*",
+    "vite": "*",
     "vite-plus": "*"
   },
   "peerDependenciesMeta": {

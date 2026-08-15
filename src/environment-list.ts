@@ -3,8 +3,10 @@ import { homedir } from "node:os";
 import type { Environment_session } from "./environment-registry.ts";
 
 type Environment_list_row = {
-  instance: string;
+  project: string;
+  session: string;
   status: string;
+  dependencies: string;
   pids: string;
   url: string;
   path: string;
@@ -12,10 +14,6 @@ type Environment_list_row = {
 
 function get_environment_status(session: Environment_session) {
   return session.runner_pid === null ? "starting" : "running";
-}
-
-function get_instance_name(session: Environment_session) {
-  return `${session.app_name}/${session.worktree_slug ?? "main"}`;
 }
 
 function get_pid_list(session: Environment_session) {
@@ -34,8 +32,10 @@ function shorten_home_path(path: string) {
 
 function to_row(session: Environment_session): Environment_list_row {
   return {
-    instance: get_instance_name(session),
+    project: session.project_name,
+    session: session.session_name,
     status: get_environment_status(session),
+    dependencies: session.owns_dependencies ? "self" : session.dependency_owner,
     pids: get_pid_list(session),
     url: session.public_url,
     path: shorten_home_path(session.worktree_path),
@@ -53,13 +53,15 @@ export function format_environment_list(sessions: Environment_session[]) {
 
   const rows = sessions.map(to_row);
   const headers: Environment_list_row = {
-    instance: "INSTANCE",
+    project: "PROJECT",
+    session: "SESSION",
     status: "STATUS",
+    dependencies: "DEPS",
     pids: "PIDS",
     url: "URL",
     path: "PATH",
   };
-  const columns = ["instance", "status", "pids", "url"] as const;
+  const columns = ["project", "session", "status", "dependencies", "pids", "url"] as const;
   const widths = Object.fromEntries(
     columns.map((column) => [
       column,
@@ -70,8 +72,10 @@ export function format_environment_list(sessions: Environment_session[]) {
   return [headers, ...rows]
     .map((row) =>
       [
-        pad(row.instance, widths.instance),
+        pad(row.project, widths.project),
+        pad(row.session, widths.session),
         pad(row.status, widths.status),
+        pad(row.dependencies, widths.dependencies),
         pad(row.pids, widths.pids),
         pad(row.url, widths.url),
         row.path,

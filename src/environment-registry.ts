@@ -11,15 +11,18 @@ import {
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import type { Devtree_instance } from "./instance.ts";
+import type { Devtree_instance, Resolved_endpoint } from "./instance.ts";
 import type { Routing_provider_kind } from "./routing.ts";
 
 export type Environment_session = {
-  version: 1;
+  version: 2;
   session_id: string;
   instance_id: string;
-  app_name: string;
-  worktree_slug: string | null;
+  project_name: string;
+  session_name: string;
+  dependency_owner: string;
+  owns_dependencies: boolean;
+  endpoints: Record<string, Resolved_endpoint>;
   worktree_path: string;
   public_url: string;
   routing_provider: Routing_provider_kind;
@@ -28,9 +31,7 @@ export type Environment_session = {
   started_at: string;
 };
 
-export function get_environment_sessions_path(
-  state_root = resolve(homedir(), ".devtree"),
-) {
+export function get_environment_sessions_path(state_root = resolve(homedir(), ".devtree")) {
   return resolve(state_root, "sessions");
 }
 
@@ -52,15 +53,17 @@ function is_environment_session(value: unknown): value is Environment_session {
   }
 
   return (
-    value.version === 1 &&
+    value.version === 2 &&
     typeof value.session_id === "string" &&
     typeof value.instance_id === "string" &&
-    typeof value.app_name === "string" &&
-    (typeof value.worktree_slug === "string" || value.worktree_slug === null) &&
+    typeof value.project_name === "string" &&
+    typeof value.session_name === "string" &&
+    typeof value.dependency_owner === "string" &&
+    typeof value.owns_dependencies === "boolean" &&
+    is_record(value.endpoints) &&
     typeof value.worktree_path === "string" &&
     typeof value.public_url === "string" &&
-    (value.routing_provider === "portless" ||
-      value.routing_provider === "caddy") &&
+    (value.routing_provider === "portless" || value.routing_provider === "caddy") &&
     is_positive_integer(value.controller_pid) &&
     (is_positive_integer(value.runner_pid) || value.runner_pid === null) &&
     typeof value.started_at === "string"
@@ -95,11 +98,14 @@ export function create_environment_session(
   state_root?: string,
 ): Environment_session {
   const session: Environment_session = {
-    version: 1,
+    version: 2,
     session_id: `${instance.instance_id}-${process.pid}-${randomUUID()}`,
     instance_id: instance.instance_id,
-    app_name: instance.app_name,
-    worktree_slug: instance.worktree_slug,
+    project_name: instance.project_name,
+    session_name: instance.session_name,
+    dependency_owner: instance.dependency_owner,
+    owns_dependencies: instance.dependencies.owns,
+    endpoints: instance.endpoints,
     worktree_path: instance.worktree_path,
     public_url: instance.public_url,
     routing_provider: instance.routing_provider,
@@ -110,6 +116,34 @@ export function create_environment_session(
 
   write_session(session, state_root);
   return session;
+}
+
+export function assert_environment_session_available(
+  instance: Devtree_instance,
+  state_root?: string,
+) {
+  const existing_sessions = list_environment_sessions(state_root);
+  const existing_session = existing_sessions.find(
+    (session) =>
+      session.project_name === instance.project_name &&
+      session.session_name === instance.session_name,
+  );
+
+  if (existing_session) {
+    throw new Error(
+      `Session "${instance.project_name}/${instance.session_name}" is already ${existing_session.runner_pid ? "running" : "starting"} at ${existing_session.public_url}.`,
+    );
+  }
+
+  const worktree_session = existing_sessions.find(
+    (session) => session.worktree_path === instance.worktree_path,
+  );
+
+  if (worktree_session) {
+    throw new Error(
+      `Worktree "${instance.worktree_path}" already runs session "${worktree_session.project_name}/${worktree_session.session_name}". Stop it before starting another session from the same checkout.`,
+    );
+  }
 }
 
 export function set_environment_session_runner_pid(
@@ -163,12 +197,23 @@ export function list_environment_sessions(state_root?: string) {
   }
 
   return sessions.sort((left, right) => {
-    const app_comparison = left.app_name.localeCompare(right.app_name);
+    const project_comparison = left.project_name.localeCompare(right.project_name);
 
-    if (app_comparison !== 0) {
-      return app_comparison;
+    if (project_comparison !== 0) {
+      return project_comparison;
     }
 
-    return left.started_at.localeCompare(right.started_at);
+    return left.session_name.localeCompare(right.session_name);
   });
+}
+
+export function list_dependency_stack_sessions(
+  project_name: string,
+  dependency_owner: string,
+  state_root?: string,
+) {
+  return list_environment_sessions(state_root).filter(
+    (session) =>
+      session.project_name === project_name && session.dependency_owner === dependency_owner,
+  );
 }

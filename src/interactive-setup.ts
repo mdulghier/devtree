@@ -1,4 +1,4 @@
-import { createInterface } from "node:readline/promises";
+import { cancel, confirm, isCancel, text } from "@clack/prompts";
 
 import type { Loaded_devtree_config } from "./config.ts";
 import { validate_public_hostname, slugify } from "./hostname.ts";
@@ -21,11 +21,40 @@ export type Interactive_setup_dependencies = {
   ) => { project_path: string; local_path: string };
 };
 
-function get_default_dependencies(
-  ask: Interactive_setup_dependencies["ask"],
-): Interactive_setup_dependencies {
+async function ask_with_clack(question: string) {
+  const confirmation_match = question.match(/^(.*) \[Y\/n\]: $/u);
+
+  if (confirmation_match) {
+    const answer = await confirm({
+      message: confirmation_match[1] ?? question,
+      initialValue: true,
+    });
+
+    if (isCancel(answer)) {
+      cancel("Setup cancelled.");
+      throw new Error("Interactive setup cancelled.");
+    }
+
+    return answer ? "yes" : "no";
+  }
+
+  const default_match = question.match(/^(.*) \[([^\]]+)\]: $/u);
+  const answer = await text({
+    message: default_match?.[1] ?? question.replace(/: $/u, ""),
+    initialValue: default_match?.[2],
+  });
+
+  if (isCancel(answer)) {
+    cancel("Setup cancelled.");
+    throw new Error("Interactive setup cancelled.");
+  }
+
+  return answer;
+}
+
+function get_default_dependencies(): Interactive_setup_dependencies {
   return {
-    ask,
+    ask: ask_with_clack,
     log: console.log,
     command_exists,
     resolve_tailscale: (loaded_config) =>
@@ -75,11 +104,7 @@ async function ask_machine_name(
   default_value?: string,
 ) {
   while (true) {
-    const answer = await ask_with_default(
-      dependencies,
-      "Machine namespace",
-      default_value,
-    );
+    const answer = await ask_with_default(dependencies, "Machine namespace", default_value);
     const machine_name = slugify(answer);
 
     if (!machine_name) {
@@ -96,10 +121,7 @@ async function ask_machine_name(
   }
 }
 
-async function ask_port(
-  dependencies: Interactive_setup_dependencies,
-  default_port: number,
-) {
+async function ask_port(dependencies: Interactive_setup_dependencies, default_port: number) {
   while (true) {
     const answer = await ask_with_default(
       dependencies,
@@ -116,10 +138,7 @@ async function ask_port(
   }
 }
 
-async function ask_confirmation(
-  dependencies: Interactive_setup_dependencies,
-  question: string,
-) {
+async function ask_confirmation(dependencies: Interactive_setup_dependencies, question: string) {
   while (true) {
     const answer = (await dependencies.ask(`${question} [Y/n]: `)).trim().toLowerCase();
 
@@ -239,23 +258,8 @@ export async function run_interactive_setup(
   provided_dependencies?: Interactive_setup_dependencies,
 ) {
   if (provided_dependencies) {
-    return run_interactive_setup_with_dependencies(
-      loaded_config,
-      provided_dependencies,
-    );
+    return run_interactive_setup_with_dependencies(loaded_config, provided_dependencies);
   }
 
-  const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  try {
-    return await run_interactive_setup_with_dependencies(
-      loaded_config,
-      get_default_dependencies((question) => readline.question(question)),
-    );
-  } finally {
-    readline.close();
-  }
+  return run_interactive_setup_with_dependencies(loaded_config, get_default_dependencies());
 }

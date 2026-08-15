@@ -1,15 +1,15 @@
 # Simple Portless example
 
 This is the smallest useful Devtree setup. It runs a plain Vite application with
-Portless and gives every checkout its own `.localhost` URL.
+Portless and gives every named session its own `.localhost` URL.
 
-The main checkout uses:
+The default session uses:
 
 ```text
 http://simple-demo.localhost:1355
 ```
 
-A worktree named `portless-worktree` uses:
+A session named `portless-worktree` uses:
 
 ```text
 http://portless-worktree.simple-demo.localhost:1355
@@ -50,7 +50,7 @@ pnpm install
 
 Portless is included in the example's development dependencies.
 
-### 3. Check and prepare the checkout
+### 3. Check and prepare the project
 
 ```bash
 pnpm devtree doctor --fix
@@ -58,7 +58,7 @@ pnpm devtree setup
 ```
 
 The first command checks the required tools and starts the shared Portless proxy
-when needed. The second writes this checkout's values to `.env.local`.
+when needed. The second writes the default session's values to `.env.local`.
 
 ### 4. Start Vite
 
@@ -67,7 +67,7 @@ pnpm devtree dev
 ```
 
 Open [http://simple-demo.localhost:1355](http://simple-demo.localhost:1355).
-The page shows the configured URL and checkout name so you can see which process
+The page shows the configured URL and session name so you can see which process
 handled the request.
 
 Leave this command running while you try the worktree below.
@@ -84,21 +84,21 @@ pnpm install
 pnpm build
 cd examples/simple-portless
 pnpm install
-pnpm devtree setup
 pnpm devtree dev
 ```
 
 Open
 [http://portless-worktree.simple-demo.localhost:1355](http://portless-worktree.simple-demo.localhost:1355).
-The original URL remains available at the same time. Devtree wrote a separate
-`.env.local`, and Portless sends each hostname to the right Vite process.
+The original URL remains available at the same time. The worktree derives the
+`portless-worktree` session name, and Portless sends each hostname to the right
+Vite process.
 
 ## Useful commands
 
 Run these from `examples/simple-portless` in the checkout you want to inspect:
 
 ```bash
-# Show the URL, checkout identity, and allocated values
+# Show the project, session, URL, and allocated values
 pnpm devtree info
 
 # Check the local setup without changing it

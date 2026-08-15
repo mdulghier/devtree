@@ -6,7 +6,7 @@ import type { Devtree_config } from "./config.ts";
 const config_file_text = `import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
-  app_name: "demo-app",
+  project_name: "demo-app",
   tailscale: {
     enabled: false,
   },
@@ -45,7 +45,7 @@ describe("update_config_text", () => {
 
 describe("get_config_value", () => {
   const config: Devtree_config = {
-    app_name: "demo-app",
+    project_name: "demo-app",
     tailscale: {
       enabled: true,
     },

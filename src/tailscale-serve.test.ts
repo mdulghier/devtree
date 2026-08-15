@@ -7,10 +7,7 @@ import { afterEach, describe, expect, test } from "vite-plus/test";
 import type { Loaded_devtree_config } from "./config.ts";
 import { format_routing_info_lines } from "./info.ts";
 import { create_devtree_instance } from "./instance.ts";
-import {
-  get_persisted_active_tailscale_routing,
-  read_routing_state,
-} from "./routing-state.ts";
+import { get_persisted_active_tailscale_routing, read_routing_state } from "./routing-state.ts";
 import type { Command_result } from "./process.ts";
 import type { Resolved_tailscale } from "./tailscale.ts";
 import {
@@ -33,13 +30,13 @@ function create_temporary_directory(prefix: string) {
   return temporary_directory;
 }
 
-function create_instance(repo_root: string) {
+function create_instance(repo_root: string, session_name?: string) {
   const loaded_config: Loaded_devtree_config = {
     config: {
-      app_name: "web-ui",
+      project_name: "web-ui",
       routing: {
         provider: { kind: "caddy" },
-        hostname: ({ app_name }) => `${app_name}.alice.dev.example.com`,
+        hostname: ({ project_name }) => `${project_name}.alice.dev.example.com`,
         port: 1355,
       },
       tailscale: {
@@ -55,7 +52,7 @@ function create_instance(repo_root: string) {
     repo_root,
   };
 
-  return create_devtree_instance(loaded_config);
+  return create_devtree_instance(loaded_config, { session_name });
 }
 
 function create_tailscale(): Resolved_tailscale {
@@ -111,9 +108,7 @@ function create_dependencies(initial_config: Serve_config = {}) {
   return { commands, dependencies, serve_config };
 }
 
-function get_mutating_commands(
-  commands: Array<{ command: string; args: string[] }>,
-) {
+function get_mutating_commands(commands: Array<{ command: string; args: string[] }>) {
   return commands.filter(({ args }) => args[1] !== "status");
 }
 
@@ -127,9 +122,7 @@ describe("Tailscale Serve lifecycle", () => {
   test("defaults the tailnet port to the shared routing port", () => {
     expect(resolve_tailscale_serve_port(undefined, 1355)).toBe(1355);
     expect(resolve_tailscale_serve_port(2468, 1355)).toBe(2468);
-    expect(() => resolve_tailscale_serve_port(70_000, 1355)).toThrow(
-      "tailscale.serve_port",
-    );
+    expect(() => resolve_tailscale_serve_port(70_000, 1355)).toThrow("tailscale.serve_port");
   });
 
   test("configures a first-time TCP Serve mapping and records ownership", () => {
@@ -149,22 +142,14 @@ describe("Tailscale Serve lifecycle", () => {
     expect(get_mutating_commands(commands)).toEqual([
       {
         command: "tailscale",
-        args: [
-          "serve",
-          "--tcp=1355",
-          "--bg",
-          "--yes",
-          "tcp://localhost:1355",
-        ],
+        args: ["serve", "--tcp=1355", "--bg", "--yes", "tcp://localhost:1355"],
       },
     ]);
     expect(active_routing).toMatchObject({
       tailscale_url: "http://web-ui.alice.dev.example.com:1355",
       mapping_owned: true,
     });
-    expect(
-      read_routing_state(state_path).tailscale_mappings["node-123:1355"],
-    ).toMatchObject({
+    expect(read_routing_state(state_path).tailscale_mappings["node-123:1355"]).toMatchObject({
       target: "localhost:1355",
       owned: true,
       consumer_instance_ids: [instance.instance_id],
@@ -246,8 +231,8 @@ describe("Tailscale Serve lifecycle", () => {
     const state_root = create_temporary_directory("devtree-state-");
     const state_path = resolve(state_root, "routing-state.json");
     const { commands, dependencies } = create_dependencies();
-    const first_instance = create_instance("/tmp/devtree-tailscale-worktree-one");
-    const second_instance = create_instance("/tmp/devtree-tailscale-worktree-two");
+    const first_instance = create_instance("/tmp/devtree-tailscale-worktree-one", "worktree-one");
+    const second_instance = create_instance("/tmp/devtree-tailscale-worktree-two", "worktree-two");
 
     for (const instance of [first_instance, second_instance]) {
       ensure_tailscale_serve({
@@ -262,8 +247,7 @@ describe("Tailscale Serve lifecycle", () => {
 
     expect(get_mutating_commands(commands)).toHaveLength(1);
     expect(
-      read_routing_state(state_path).tailscale_mappings["node-123:1355"]
-        ?.consumer_instance_ids,
+      read_routing_state(state_path).tailscale_mappings["node-123:1355"]?.consumer_instance_ids,
     ).toEqual([first_instance.instance_id, second_instance.instance_id].sort());
   });
 
@@ -282,15 +266,10 @@ describe("Tailscale Serve lifecycle", () => {
     });
 
     const fresh_instance = create_instance("/tmp/devtree-tailscale-info");
-    const discovered_routing = get_persisted_active_tailscale_routing(
-      fresh_instance,
-      state_path,
-    );
+    const discovered_routing = get_persisted_active_tailscale_routing(fresh_instance, state_path);
 
     expect(discovered_routing?.tailscale_url).toBe(startup_routing.tailscale_url);
-    expect(discovered_routing?.tailscale_url).toBe(
-      "http://web-ui.alice.dev.example.com:2468",
-    );
+    expect(discovered_routing?.tailscale_url).toBe("http://web-ui.alice.dev.example.com:2468");
     expect(
       format_routing_info_lines({
         instance: fresh_instance,
@@ -298,9 +277,7 @@ describe("Tailscale Serve lifecycle", () => {
         active_tailscale_routing: discovered_routing,
         configured_tailscale_port: 2468,
       }),
-    ).toContain(
-      "Tailscale application URL: http://web-ui.alice.dev.example.com:2468",
-    );
+    ).toContain("Tailscale application URL: http://web-ui.alice.dev.example.com:2468");
   });
 
   test("cleanup removes only the Devtree-owned port", () => {
@@ -331,9 +308,7 @@ describe("Tailscale Serve lifecycle", () => {
       "--yes",
       "off",
     ]);
-    expect(
-      read_routing_state(state_path).tailscale_mappings["node-123:1355"],
-    ).toBeUndefined();
+    expect(read_routing_state(state_path).tailscale_mappings["node-123:1355"]).toBeUndefined();
   });
 
   test("does not remove an identical externally managed mapping", () => {
@@ -355,9 +330,7 @@ describe("Tailscale Serve lifecycle", () => {
     };
 
     expect(ensure_tailscale_serve(options).mapping_owned).toBe(false);
-    expect(() => remove_owned_tailscale_serve(options)).toThrow(
-      "cannot prove ownership",
-    );
+    expect(() => remove_owned_tailscale_serve(options)).toThrow("cannot prove ownership");
     expect(get_mutating_commands(commands)).toEqual([]);
   });
 

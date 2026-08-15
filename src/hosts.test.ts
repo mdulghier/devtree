@@ -32,6 +32,20 @@ describe("hosts entries", () => {
     );
   });
 
+  test("formats every configured endpoint hostname", () => {
+    const public_hostnames = [
+      "feature-123--web-ui.alice.dev.example.com",
+      "feature-123--api--web-ui.alice.dev.example.com",
+    ];
+
+    expect(format_local_hosts_section(public_hostnames)).toContain(
+      "127.0.0.1 feature-123--api--web-ui.alice.dev.example.com",
+    );
+    expect(format_tailscale_hosts_section(public_hostnames, "100.101.102.103")).toContain(
+      "100.101.102.103 feature-123--api--web-ui.alice.dev.example.com",
+    );
+  });
+
   test("uses one space between the address and hostname", () => {
     expect(create_hosts_entry("127.0.0.1", "web-ui.alice.dev.example.com")).toBe(
       "127.0.0.1 web-ui.alice.dev.example.com",

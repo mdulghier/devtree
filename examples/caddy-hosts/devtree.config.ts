@@ -1,17 +1,24 @@
 import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
-  app_name: "caddy-demo",
+  project_name: "caddy-demo",
 
   dev_server: {
     runner: "vite",
   },
 
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
+  },
+
   env: {
     provider: "dotenv",
-    entries: ({ instance }) => {
-      const database_port = instance.allocate_port("postgres", 5400);
-      const redis_port = instance.allocate_port("redis", 6300);
+    entries: ({ instance, dependencies }) => {
+      const database_port = dependencies.allocate_port("postgres", 5400);
+      const redis_port = dependencies.allocate_port("redis", 6300);
       const database_url = `postgresql://app:app@127.0.0.1:${database_port}/app`;
       const redis_url = `redis://127.0.0.1:${redis_port}`;
 
@@ -28,8 +35,8 @@ export default define_devtree_config({
         },
         {
           kind: "value",
-          key: "VITE_DEVTREE_WORKTREE",
-          value: instance.worktree_slug ?? "main checkout",
+          key: "VITE_DEVTREE_SESSION",
+          value: instance.session_name,
         },
         {
           kind: "value",

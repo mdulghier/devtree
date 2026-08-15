@@ -22,9 +22,9 @@ describe("parse_tailscale_host", () => {
   });
 
   test("detects a connected Tailscale backend without requiring MagicDNS", () => {
-    expect(
-      parse_tailscale_connection(JSON.stringify({ BackendState: "Running", Self: {} })),
-    ).toBe(true);
+    expect(parse_tailscale_connection(JSON.stringify({ BackendState: "Running", Self: {} }))).toBe(
+      true,
+    );
   });
 
   test("reads the node identity and IPv4 address from status", () => {
@@ -39,7 +39,7 @@ describe("parse_tailscale_host", () => {
 
   test("keeps enabled configurations in legacy direct mode by default", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       tailscale: { enabled: true },
       env: { provider: "dotenv", entries: () => [] },
     };
@@ -49,7 +49,7 @@ describe("parse_tailscale_host", () => {
 
   test("infers proxy mode when Tailscale is enabled with Caddy", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       routing: { provider: { kind: "caddy" } },
       tailscale: { enabled: true },
       env: { provider: "dotenv", entries: () => [] },
@@ -60,7 +60,7 @@ describe("parse_tailscale_host", () => {
 
   test("resolves the explicit Portless proxy mode", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       tailscale: { enabled: true, mode: "portless-proxy" },
       env: { provider: "dotenv", entries: () => [] },
     };
@@ -70,7 +70,7 @@ describe("parse_tailscale_host", () => {
 
   test("resolves the provider-neutral proxy mode", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       tailscale: { enabled: true, mode: "proxy" },
       env: { provider: "dotenv", entries: () => [] },
     };
@@ -81,7 +81,7 @@ describe("parse_tailscale_host", () => {
   test("does not execute commands when Tailscale is disabled", () => {
     const commands: string[] = [];
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       env: { provider: "dotenv", entries: () => [] },
     };
 
@@ -102,7 +102,7 @@ describe("parse_tailscale_host", () => {
 
   test("reports a missing Tailscale CLI actionably", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       tailscale: { enabled: true, mode: "proxy" },
       env: { provider: "dotenv", entries: () => [] },
     };
@@ -121,7 +121,7 @@ describe("parse_tailscale_host", () => {
 
   test("reports a disconnected tailnet actionably", () => {
     const config: Devtree_config = {
-      app_name: "demo",
+      project_name: "demo",
       tailscale: { enabled: true, mode: "proxy" },
       env: { provider: "dotenv", entries: () => [] },
     };

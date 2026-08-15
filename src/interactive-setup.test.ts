@@ -1,15 +1,12 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import type { Loaded_devtree_config } from "./config.ts";
-import {
-  run_interactive_setup,
-  type Interactive_setup_dependencies,
-} from "./interactive-setup.ts";
+import { run_interactive_setup, type Interactive_setup_dependencies } from "./interactive-setup.ts";
 
 function create_loaded_config(): Loaded_devtree_config {
   return {
     config: {
-      app_name: "web-ui",
+      project_name: "web-ui",
       env: { provider: "dotenv", entries: () => [] },
     },
     config_path: "/repo/devtree.config.ts",
@@ -97,9 +94,9 @@ describe("interactive setup", () => {
       },
     };
 
-    await expect(
-      run_interactive_setup(create_loaded_config(), dependencies),
-    ).resolves.toEqual({ configured: false });
+    await expect(run_interactive_setup(create_loaded_config(), dependencies)).resolves.toEqual({
+      configured: false,
+    });
     expect(write_count).toBe(0);
   });
 
@@ -125,9 +122,9 @@ describe("interactive setup", () => {
       write_config: () => ({ project_path: "", local_path: "" }),
     };
 
-    await expect(
-      run_interactive_setup(create_loaded_config(), dependencies),
-    ).rejects.toThrow("not available on PATH");
+    await expect(run_interactive_setup(create_loaded_config(), dependencies)).rejects.toThrow(
+      "not available on PATH",
+    );
     expect(prompt_count).toBe(0);
   });
 });

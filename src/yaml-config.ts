@@ -9,6 +9,7 @@ import type {
   Routing_provider,
   Tailscale_mode,
 } from "./config.ts";
+import { join_identity_slugs } from "./hostname.ts";
 import {
   DEVTREE_PROJECT_CONFIG_FILENAME,
   resolve_devtree_local_config_path,
@@ -76,11 +77,7 @@ function assert_known_keys(
   }
 }
 
-function read_optional_string(
-  value: Record<string, unknown>,
-  key: string,
-  source: string,
-) {
+function read_optional_string(value: Record<string, unknown>, key: string, source: string) {
   const raw_value = value[key];
 
   if (raw_value === undefined) {
@@ -94,11 +91,7 @@ function read_optional_string(
   return raw_value.trim().toLowerCase();
 }
 
-function read_optional_boolean(
-  value: Record<string, unknown>,
-  key: string,
-  source: string,
-) {
+function read_optional_boolean(value: Record<string, unknown>, key: string, source: string) {
   const raw_value = value[key];
 
   if (raw_value === undefined) {
@@ -112,11 +105,7 @@ function read_optional_boolean(
   return raw_value;
 }
 
-function read_optional_port(
-  value: Record<string, unknown>,
-  key: string,
-  source: string,
-) {
+function read_optional_port(value: Record<string, unknown>, key: string, source: string) {
   const raw_value = value[key];
 
   if (raw_value === undefined) {
@@ -157,10 +146,7 @@ function parse_routing_config(value: unknown, source: string): Yaml_routing_conf
   };
 }
 
-function parse_tailscale_config(
-  value: unknown,
-  source: string,
-): Yaml_tailscale_config | undefined {
+function parse_tailscale_config(value: unknown, source: string): Yaml_tailscale_config | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -173,15 +159,8 @@ function parse_tailscale_config(
 
   const mode = read_optional_string(value, "mode", source);
 
-  if (
-    mode !== undefined &&
-    mode !== "direct" &&
-    mode !== "proxy" &&
-    mode !== "portless-proxy"
-  ) {
-    throw new Error(
-      `${source}.mode must be "direct", "proxy", or "portless-proxy".`,
-    );
+  if (mode !== undefined && mode !== "direct" && mode !== "proxy" && mode !== "portless-proxy") {
+    throw new Error(`${source}.mode must be "direct", "proxy", or "portless-proxy".`);
   }
 
   return {
@@ -191,10 +170,7 @@ function parse_tailscale_config(
   };
 }
 
-function parse_registry_config(
-  value: unknown,
-  source: string,
-): Yaml_registry_config | undefined {
+function parse_registry_config(value: unknown, source: string): Yaml_registry_config | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -257,19 +233,13 @@ function merge_yaml_config(
   override_config: Devtree_yaml_config,
 ): Devtree_yaml_config {
   const defined_routing_overrides = Object.fromEntries(
-    Object.entries(override_config.routing ?? {}).filter(
-      ([, value]) => value !== undefined,
-    ),
+    Object.entries(override_config.routing ?? {}).filter(([, value]) => value !== undefined),
   ) as Yaml_routing_config;
   const defined_tailscale_overrides = Object.fromEntries(
-    Object.entries(override_config.tailscale ?? {}).filter(
-      ([, value]) => value !== undefined,
-    ),
+    Object.entries(override_config.tailscale ?? {}).filter(([, value]) => value !== undefined),
   ) as Yaml_tailscale_config;
   const defined_registry_overrides = Object.fromEntries(
-    Object.entries(override_config.registry ?? {}).filter(
-      ([, value]) => value !== undefined,
-    ),
+    Object.entries(override_config.registry ?? {}).filter(([, value]) => value !== undefined),
   ) as Yaml_registry_config;
 
   return {
@@ -332,8 +302,18 @@ function create_yaml_hostname_resolver(
     return null;
   }
 
-  return ({ app_name, worktree_slug }) => {
-    const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
+  return ({
+    project_name,
+    session_name,
+    endpoint_name,
+    is_primary_endpoint,
+    is_default_session,
+  }) => {
+    const route_name = join_identity_slugs([
+      ...(is_default_session ? [] : [session_name]),
+      ...(is_primary_endpoint ? [] : [endpoint_name]),
+      project_name,
+    ]);
     return `${route_name}.${hostname_suffix}`;
   };
 }
@@ -345,12 +325,9 @@ export function apply_devtree_yaml_config(
   const yaml_routing = yaml_config.routing;
   const yaml_tailscale = yaml_config.tailscale;
   const yaml_registry = yaml_config.registry;
-  const hostname_resolver = yaml_routing
-    ? create_yaml_hostname_resolver(yaml_routing)
-    : null;
+  const hostname_resolver = yaml_routing ? create_yaml_hostname_resolver(yaml_routing) : null;
   const has_routing_values =
-    yaml_routing !== undefined &&
-    Object.values(yaml_routing).some((value) => value !== undefined);
+    yaml_routing !== undefined && Object.values(yaml_routing).some((value) => value !== undefined);
   const has_tailscale_values =
     yaml_tailscale !== undefined &&
     Object.values(yaml_tailscale).some((value) => value !== undefined);
@@ -369,10 +346,7 @@ export function apply_devtree_yaml_config(
     routing: has_routing_values
       ? {
           ...config.routing,
-          provider: resolve_yaml_provider(
-            yaml_routing.provider,
-            config.routing?.provider,
-          ),
+          provider: resolve_yaml_provider(yaml_routing.provider, config.routing?.provider),
           hostname: hostname_resolver ?? config.routing?.hostname,
           port: yaml_routing.port ?? config.routing?.port,
           https: yaml_routing.https ?? config.routing?.https,

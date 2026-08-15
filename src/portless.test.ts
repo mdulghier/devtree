@@ -1,24 +1,22 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import {
-  get_portless_compatibility_error,
-  portless_supports_exact_hostname,
-} from "./portless.ts";
+import { get_portless_alias_add_args, get_portless_alias_remove_args } from "./portless.ts";
 
-describe("Portless compatibility", () => {
-  test("accepts a CLI with the exact-hostname contract", () => {
-    const help_text = "portless run --hostname <hostname> [command...]";
-
-    expect(portless_supports_exact_hostname(help_text)).toBe(true);
-    expect(get_portless_compatibility_error(help_text)).toBeNull();
+describe("Portless endpoint aliases", () => {
+  test("registers a complete hostname for a fixed target port", () => {
+    expect(get_portless_alias_add_args("feature.api.project.localhost", 5317)).toEqual([
+      "alias",
+      "feature.api.project.localhost",
+      "5317",
+      "--force",
+    ]);
   });
 
-  test("reports an actionable error for the current legacy CLI contract", () => {
-    const help_text = "portless run --name <name> [command...]";
-
-    expect(portless_supports_exact_hostname(help_text)).toBe(false);
-    expect(get_portless_compatibility_error(help_text)).toContain(
-      "without adding a worktree prefix",
-    );
+  test("removes only the named alias", () => {
+    expect(get_portless_alias_remove_args("feature.api.project.localhost")).toEqual([
+      "alias",
+      "--remove",
+      "feature.api.project.localhost",
+    ]);
   });
 });

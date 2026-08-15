@@ -1,12 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -23,7 +16,7 @@ import { resolve_devtree_local_config_path } from "./yaml-config-paths.ts";
 
 function create_base_config(): Devtree_config {
   return {
-    app_name: "web-ui",
+    project_name: "web-ui",
     env: { provider: "dotenv", entries: () => [] },
   };
 }
@@ -62,18 +55,18 @@ describe("Devtree YAML configuration", () => {
       );
 
       const yaml_config = load_devtree_yaml_config(repo_root);
-      const config = apply_devtree_yaml_config(
-        create_base_config(),
-        yaml_config.merged,
-      );
+      const config = apply_devtree_yaml_config(create_base_config(), yaml_config.merged);
 
       expect(config.routing?.provider).toEqual({ kind: "caddy" });
       expect(config.routing?.port).toBe(2468);
       expect(config.tailscale?.enabled).toBe(true);
       expect(
         config.routing?.hostname?.({
-          app_name: "web-ui",
-          worktree_slug: "feature-123",
+          project_name: "web-ui",
+          session_name: "feature-123",
+          endpoint_name: "ui",
+          is_primary_endpoint: true,
+          is_default_session: false,
         }),
       ).toBe("feature-123--web-ui.alice.dev.example.com");
     } finally {
@@ -88,7 +81,7 @@ describe("Devtree YAML configuration", () => {
       writeFileSync(
         resolve(repo_root, "devtree.config.ts"),
         `export default {
-  app_name: "web-ui",
+  project_name: "web-ui",
   env: { provider: "dotenv", entries: () => [] },
 };
 `,
@@ -97,23 +90,21 @@ describe("Devtree YAML configuration", () => {
         resolve(repo_root, ".devtree.yml"),
         "routing:\n  provider: caddy\n  base_domain: dev.example.com\ntailscale:\n  enabled: true\n",
       );
-      writeFileSync(
-        resolve(repo_root, ".devtree.local.yml"),
-        "routing:\n  machine_name: alice\n",
-      );
+      writeFileSync(resolve(repo_root, ".devtree.local.yml"), "routing:\n  machine_name: alice\n");
 
       const loaded_config = await load_devtree_config(repo_root);
 
       expect(loaded_config.config.routing?.provider).toEqual({ kind: "caddy" });
       expect(
         loaded_config.config.routing?.hostname?.({
-          app_name: "web-ui",
-          worktree_slug: null,
+          project_name: "web-ui",
+          session_name: "default",
+          endpoint_name: "ui",
+          is_primary_endpoint: true,
+          is_default_session: true,
         }),
       ).toBe("web-ui.alice.dev.example.com");
-      expect(loaded_config.yaml_config?.local_path).toBe(
-        resolve(repo_root, ".devtree.local.yml"),
-      );
+      expect(loaded_config.yaml_config?.local_path).toBe(resolve(repo_root, ".devtree.local.yml"));
     } finally {
       rmSync(repo_root, { force: true, recursive: true });
     }
@@ -129,7 +120,13 @@ describe("Devtree YAML configuration", () => {
     });
 
     expect(
-      config.routing?.hostname?.({ app_name: "web-ui", worktree_slug: null }),
+      config.routing?.hostname?.({
+        project_name: "web-ui",
+        session_name: "default",
+        endpoint_name: "ui",
+        is_primary_endpoint: true,
+        is_default_session: true,
+      }),
     ).toBe("web-ui.custom.internal.example");
   });
 
@@ -147,14 +144,8 @@ describe("Devtree YAML configuration", () => {
       );
 
       const yaml_config = load_devtree_yaml_config(repo_root);
-      const config = apply_devtree_yaml_config(
-        create_base_config(),
-        yaml_config.merged,
-      );
-      const project_config = apply_devtree_yaml_config(
-        create_base_config(),
-        yaml_config.project,
-      );
+      const config = apply_devtree_yaml_config(create_base_config(), yaml_config.merged);
+      const project_config = apply_devtree_yaml_config(create_base_config(), yaml_config.project);
 
       expect(yaml_config.project.registry?.enabled).toBe(false);
       expect(yaml_config.local.registry?.enabled).toBe(true);
@@ -167,19 +158,13 @@ describe("Devtree YAML configuration", () => {
 
   test("rejects invalid registry settings", () => {
     expect(() =>
-      parse_devtree_yaml_config(
-        "registry:\n  enabled: sometimes\n",
-        ".devtree.yml",
-      ),
+      parse_devtree_yaml_config("registry:\n  enabled: sometimes\n", ".devtree.yml"),
     ).toThrow(".devtree.yml.registry.enabled must be true or false");
   });
 
   test("rejects unknown keys with the source filename", () => {
     expect(() =>
-      parse_devtree_yaml_config(
-        "routing:\n  base_domian: dev.example.com\n",
-        ".devtree.yml",
-      ),
+      parse_devtree_yaml_config("routing:\n  base_domian: dev.example.com\n", ".devtree.yml"),
     ).toThrow('.devtree.yml.routing contains unsupported key "base_domian"');
   });
 
@@ -187,10 +172,7 @@ describe("Devtree YAML configuration", () => {
     const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-yaml-write-test-"));
 
     try {
-      writeFileSync(
-        resolve(repo_root, ".devtree.yml"),
-        "# Keep this comment\nversion: 1\n",
-      );
+      writeFileSync(resolve(repo_root, ".devtree.yml"), "# Keep this comment\nversion: 1\n");
 
       write_interactive_yaml_setup(repo_root, {
         base_domain: "dev.example.com",
@@ -199,10 +181,7 @@ describe("Devtree YAML configuration", () => {
       });
 
       const project_text = readFileSync(resolve(repo_root, ".devtree.yml"), "utf8");
-      const local_text = readFileSync(
-        resolve(repo_root, ".devtree.local.yml"),
-        "utf8",
-      );
+      const local_text = readFileSync(resolve(repo_root, ".devtree.local.yml"), "utf8");
 
       expect(project_text).toContain("# Keep this comment");
       expect(project_text).toContain("base_domain: dev.example.com");
@@ -233,16 +212,10 @@ describe("Devtree YAML configuration", () => {
       run_git(primary_root, ["commit", "--quiet", "-m", "initial"]);
       run_git(primary_root, ["worktree", "add", "--quiet", "-b", "feature", linked_root]);
 
-      const primary_local_path = resolve(
-        primary_root,
-        project_path,
-        ".devtree.local.yml",
-      );
+      const primary_local_path = resolve(primary_root, project_path, ".devtree.local.yml");
       writeFileSync(primary_local_path, "version: 1\n");
 
-      expect(
-        resolve_devtree_local_config_path(resolve(linked_root, project_path)),
-      ).toBe(
+      expect(resolve_devtree_local_config_path(resolve(linked_root, project_path))).toBe(
         realpathSync(primary_local_path),
       );
     } finally {

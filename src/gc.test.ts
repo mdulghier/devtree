@@ -48,4 +48,24 @@ describe("classify_projects", () => {
 
     rmSync(active_worktree_path, { force: true, recursive: true });
   });
+
+  test("keeps an orphaned owner stack while a live session consumes it", () => {
+    const protected_project = {
+      project_name: "protected-project",
+      worktree_path: "/tmp/deleted-owner-worktree",
+      registry_namespace: "demo-app",
+      containers: [],
+      networks: [],
+      volumes: [],
+      sources: new Set(["registry"]),
+    };
+    const classified_projects = classify_projects(
+      [protected_project],
+      new Set(),
+      new Set(["protected-project"]),
+    );
+
+    expect(classified_projects.active_projects).toEqual([protected_project]);
+    expect(classified_projects.orphan_projects).toEqual([]);
+  });
 });

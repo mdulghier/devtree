@@ -1,94 +1,69 @@
 # Devtree
 
-Run the same Vite application from multiple Git worktrees without URL, port, environment, or dependency collisions.
+Run the same project in multiple checkouts without fighting over ports, URLs, or
+Docker state.
 
-By default, every checkout gets a predictable `.localhost` URL:
+The main checkout runs as `default` and owns its dependencies. Worktrees get
+their own name and URL, but reuse the `default` database and brokers unless you
+pass `-d`. A project can also expose several services, such as a UI and API,
+under separate local domains.
 
-```text
-Main checkout
-http://web-ui.localhost:1355
+## URLs
 
-Feature worktree
-http://feature-123.web-ui.localhost:1355
-```
+Suppose a project named `acme-cloud` exposes a primary `ui` endpoint and an `api` endpoint.
 
-This setup uses Portless and works without custom DNS, Tailscale, or Caddy.
-
-When the application also needs to be reachable from other machines, you can switch to Caddy and use the same custom URL locally and over Tailscale:
+The default session uses:
 
 ```text
-http://web-ui.alice.dev.example.com:1355
-http://feature-123--web-ui.alice.dev.example.com:1355
+http://acme-cloud.localhost:1355
+http://api.acme-cloud.localhost:1355
 ```
 
-Start with the quick setup below. If `.localhost` is enough, you can stop there. When the project grows, you can add [access over Tailscale](#use-the-same-url-over-tailscale) and [separate Docker services for every worktree](#add-docker-services-for-each-worktree).
+A session named `billing-redesign` uses:
 
-If you prefer to start from a working application, the [`examples`](./examples/README.md) folder contains:
-
-- A minimal Vite application using Portless and `.localhost` URLs.
-- A complete Caddy, Tailscale, hosts-file, PostgreSQL, and Redis setup.
-
-## What Devtree adds to Portless
-
-Portless does one important job: it gives a running application a friendly local URL and sends browser requests to the right port.
-
-Devtree uses Portless for that job in the basic setup, then keeps the rest of the checkout in sync with the same worktree name.
-
-With Devtree:
-
-- `APP_URL` is written correctly in each worktree's `.env.local`.
-- Vite and local dependencies receive separate ports.
-- Docker containers, networks, and volumes receive separate names.
-- Setup commands and local services start the same way in every checkout.
-- Deleted worktrees can have their leftover resources cleaned up safely.
-
-For example, the main checkout can receive:
-
-```dotenv
-APP_URL=http://web-ui.localhost:1355
+```text
+http://billing-redesign.acme-cloud.localhost:1355
+http://billing-redesign.api.acme-cloud.localhost:1355
 ```
 
-while a feature worktree automatically receives:
+The primary endpoint omits its endpoint name. Secondary endpoints include it. This keeps the common URL short without making multiple endpoints ambiguous.
 
-```dotenv
-APP_URL=http://feature-123.web-ui.localhost:1355
+Caddy uses one flattened DNS label so a single wildcard record covers every endpoint:
+
+```text
+http://billing-redesign--acme-cloud.alice.dev.example.com:1355
+http://billing-redesign--api--acme-cloud.alice.dev.example.com:1355
 ```
-
-You do not need to edit environment files, choose ports, or rename Docker resources each time you create a worktree. Portless handles the local web address; Devtree coordinates the complete development setup around it.
 
 ## Quick start
 
 ### Prerequisites
 
-You need:
-
-- Node.js 24 or newer.
-- Git.
-- pnpm.
-- Vite or VitePlus.
-
-### 1. Install Devtree and Portless
-
-From the application repository:
+You need Node.js 24 or newer, Git, pnpm, and Vite or VitePlus. Install Devtree and Portless in the application repository:
 
 ```bash
 pnpm add -D devtree portless
 ```
 
-Portless provides the shared local port and `.localhost` URLs.
+### Configure the project
 
-### 2. Create `devtree.config.ts`
-
-Add this file at the repository root:
+Create `devtree.config.ts` at the repository root:
 
 ```ts
 import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
-  app_name: "web-ui",
+  project_name: "acme-cloud",
 
   dev_server: {
     runner: "vite",
+  },
+
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
   },
 
   env: {
@@ -104,13 +79,9 @@ export default define_devtree_config({
 });
 ```
 
-Use `runner: "vite-plus"` instead if the project runs VitePlus.
+Use `runner: "vite-plus"` for VitePlus projects.
 
-Devtree writes its environment values to `.env.local`. Existing values outside the Devtree section are left alone.
-
-### 3. Register the Vite plugin
-
-Update the project's Vite configuration:
+Register the Vite plugin:
 
 ```ts
 import { defineConfig } from "vite";
@@ -123,376 +94,184 @@ export default defineConfig({
 });
 ```
 
-VitePlus projects can keep importing `defineConfig` from `vite-plus`.
-
-### 4. Add a package script
+Add a package script:
 
 ```json
 {
   "scripts": {
+    "dev": "devtree dev",
     "devtree": "devtree"
   }
 }
 ```
 
-Use this command instead of starting Vite directly. Devtree needs to prepare the checkout and register its URL before Vite starts.
-
-### 5. Prepare the checkout
-
-Run:
+Prepare local routing once, then start development:
 
 ```bash
 pnpm devtree doctor --fix
-pnpm devtree setup
-```
-
-`doctor --fix` checks the project and starts Portless when necessary.
-
-`setup` writes the Devtree section of `.env.local`, starts configured dependencies, and runs project setup commands.
-
-### 6. Start development
-
-```bash
 pnpm devtree dev
 ```
 
-Open:
+With the `dev` script above, `pnpm dev` is the short path for the default behavior.
+Use `pnpm devtree dev` when passing Devtree-specific flags.
+
+The main checkout starts the `default` session and owns its dependency stack. A linked worktree derives its session name from its branch and reuses the `default` stack.
+
+## Start sessions
+
+### Interactive mode
+
+Use interactive mode to choose the session name and dependency stack with guided prompts:
+
+```bash
+pnpm devtree dev --interactive
+pnpm devtree dev -i
+```
 
 ```text
-http://web-ui.localhost:1355
+┌  Devtree
+│
+◇  Session name
+│  billing-redesign
+│
+◇  Dependency stack
+│  Reuse default
+│
+│  Project       acme-cloud
+│  Session       billing-redesign
+│  Dependencies  default
+│  URL           http://billing-redesign.acme-cloud.localhost:1355
+│
+└  Starting development environment
 ```
 
-Inspect the current checkout at any time:
+Explicit flags resolve the matching prompt:
 
 ```bash
-pnpm devtree info
+pnpm devtree dev -i --name billing-redesign  # Ask only about dependencies
+pnpm devtree dev -i --deps default           # Ask only about the session name
+pnpm devtree dev -i --name billing-redesign -d
 ```
 
-List every running Devtree environment on the machine from any directory:
+When every option is explicit, interactive mode prints the resolved summary and starts without asking redundant questions. Cancelling a prompt exits without writing environment files, registering routes, or starting dependencies.
+
+### Deterministic commands
+
+The same choices are available without prompts:
 
 ```bash
-pnpx devtree list
-pnpx devtree list --json
+pnpm devtree dev                         # Main owns default; worktrees reuse default
+pnpm devtree dev --name billing-redesign
+pnpm devtree dev --deps reporting       # Reuse the stack owned by reporting
+pnpm devtree dev --deps                 # Own an isolated stack
+pnpm devtree dev -d                     # Short form of bare --deps
+pnpm devtree dev --name reporting -d    # Named session with its own stack
+pnpm devtree dev -- --open              # Pass arguments after -- to Vite
 ```
 
-The list includes each environment's worktree path, public URL, Devtree process ID,
-and immediate development-runner process ID. Devtree removes the session when the
-development process exits and prunes stale sessions left behind by crashes.
+In a non-interactive terminal Devtree never prompts. It uses the documented defaults or fails with an actionable message when the requested dependency stack does not exist.
 
-Environment registration is enabled by default. To keep a project out of the
-machine-wide list, commit this setting in `.devtree.yml`:
+Session names are unique within a project. Devtree refuses to start a second live session with the same name instead of silently stealing its Portless or Caddy routes.
+One checkout may run only one live session at a time because its managed environment file is checkout-local.
 
-```yaml
-version: 1
-registry:
-  enabled: false
-```
+### Configure the default session name
 
-This setting only controls the live environment list. It does not disable routing
-state or Docker dependency metadata. A developer can override the shared setting
-in `.devtree.local.yml`; the setting takes effect the next time `devtree dev` starts.
-
-## Using Git worktrees
-
-Create a worktree as usual:
-
-```bash
-git worktree add ../web-ui-feature-123 -b feature-123
-cd ../web-ui-feature-123
-pnpm install
-pnpm devtree setup
-pnpm devtree dev
-```
-
-The main checkout remains available at:
-
-```text
-http://web-ui.localhost:1355
-```
-
-The worktree receives its own URL:
-
-```text
-http://feature-123.web-ui.localhost:1355
-```
-
-Both checkouts can run at the same time.
-
-## Use the same URL over Tailscale
-
-The default `.localhost` URLs only work on the development machine. Switch to Caddy when teammates, test devices, or other computers on your Tailscale network need to open the application.
-
-The interactive setup keeps machine-specific values in `.devtree.local.yml`; no shell environment variables or repository wrapper scripts are required. Vite remains available only on the development machine. Caddy receives requests on one shared port and sends each hostname to the correct worktree.
-
-```text
-Browser on this machine or another Tailscale machine
-  ↓
-Caddy on port 1355
-  ↓
-The Vite process for the requested hostname
-```
-
-There is one Caddy process and one Tailscale forwarding rule per developer machine. Devtree manages that shared forwarding rule. Starting another worktree only adds another Caddy route.
-
-### Interactive setup
-
-Install Caddy and Tailscale first. On macOS:
-
-```bash
-brew install caddy
-```
-
-Install Tailscale, sign in, and make sure the machine is connected to the correct Tailscale network.
-
-Run:
-
-```bash
-pnpm devtree setup --interactive
-```
-
-The wizard detects the Tailscale machine name and address, asks for the shared development domain and port, previews the resulting wildcard DNS record, and asks for confirmation before writing anything. It creates:
-
-```yaml
-# .devtree.yml — commit this file
-version: 1
-routing:
-  provider: caddy
-  base_domain: dev.example.com
-  port: 1355
-  https: false
-tailscale:
-  enabled: true
-  mode: proxy
-```
-
-```yaml
-# .devtree.local.yml — machine-specific and ignored by Git
-version: 1
-routing:
-  machine_name: alice
-```
-
-Devtree adds the local file to the repository's Git exclude file. Linked worktrees reuse the primary worktree's `.devtree.local.yml` unless they deliberately contain their own override.
-
-The wizard prints the exact wildcard record to create:
-
-```text
-*.alice.dev.example.com → 100.101.102.103
-```
-
-Configure that record and press Enter to let the wizard verify DNS and finish normal project setup. Type `later` to save the files without waiting; after DNS is ready, run:
-
-```bash
-pnpm devtree setup
-```
-
-Then start the application:
-
-```bash
-pnpm devtree dev
-```
-
-Portless and Caddy cannot listen on the same port. If Portless is already using `1355`, the setup reports the conflict actionably; stop that listener or select another port in the wizard.
-
-After startup, Devtree prints the exact application URL prominently. This is the URL to open; the machine-level TCP target alone is not sufficient because Caddy also needs the application hostname in the HTTP `Host` header:
-
-```text
-[devtree] Tailscale Serve tcp:1355 -> localhost:1355
-[devtree] Tailscale application URL http://web-ui.alice.dev.example.com:1355
-
-Open http://web-ui.alice.dev.example.com:1355
-Tailscale hostname: web-ui.alice.dev.example.com
-Tailscale port: 1355
-```
-
-The main checkout is now available at:
-
-```text
-http://web-ui.alice.dev.example.com:1355
-```
-
-A worktree named `feature-123` is available at:
-
-```text
-http://feature-123--web-ui.alice.dev.example.com:1355
-```
-
-These exact URLs work on the development machine and from other allowed machines on the Tailscale network.
-
-Discover the same URL later, including from a fresh shell, with:
-
-```bash
-pnpm devtree info
-```
-
-The output includes `Local URL`, `Tailscale application URL`, `Tailscale application hostname`, `Tailscale application port`, and the active Serve mapping. Devtree persists this resolved routing state under `~/.devtree/routing-state.json`; consumers should use the CLI rather than reading that implementation file directly.
-
-Devtree converts uppercase letters, slashes, punctuation, and long branch names into safe hostname labels. It adds a short, stable suffix when two converted names could otherwise be the same.
-
-### Non-interactive configuration
-
-Automation and developers who prefer declarative setup can create `.devtree.yml` and `.devtree.local.yml` directly using the schemas above, then run ordinary `devtree setup` or `devtree dev`. The local file wins when both files define the same supported value. Existing `routing.hostname` callbacks remain supported as the advanced escape hatch.
-
-`routing.hostname_suffix` can replace `base_domain` plus `machine_name` when the complete wildcard suffix does not follow Devtree's standard naming pattern:
-
-```yaml
-routing:
-  hostname_suffix: apps.alice.internal.example
-```
-
-No `sslip.io` dependency is required. It can still be used explicitly by setting a compatible `hostname_suffix` yourself.
-
-For a small setup without wildcard DNS, `pnpm devtree hosts` prints the exact local and tailnet hosts-file entries. Hosts files require one entry per worktree; DNS is preferable when worktrees are created frequently.
-
-### Multiple worktrees share the proxy
-
-For example, start the main checkout and a feature worktree in separate terminals:
-
-```bash
-# Main checkout
-pnpm devtree dev
-
-# ../web-ui-feature-123
-pnpm devtree setup
-pnpm devtree dev
-```
-
-With the YAML configuration above, they are available concurrently at:
-
-```text
-http://web-ui.alice.dev.example.com:1355
-http://feature-123--web-ui.alice.dev.example.com:1355
-```
-
-Both use one Caddy listener and one Tailscale TCP mapping. Stopping either development process removes only that worktree's Caddy route; it does not remove the shared Tailscale mapping.
-
-### Inspect or remove the owned mapping
-
-Inspect the desired mapping, live Serve route, ownership, and number of recorded worktrees with:
-
-```bash
-pnpm devtree tailscale status
-```
-
-When the shared mapping is no longer wanted, remove it explicitly with:
-
-```bash
-pnpm devtree tailscale remove
-```
-
-Removal uses `tailscale serve --tcp=<port> --yes off`, affecting only the configured TCP port. Devtree permits removal only when its persisted ownership record and the live mapping agree exactly. If the matching route existed before Devtree first saw it, Devtree treats it as external and refuses to remove it. Conflicting mappings are also left untouched with an error explaining how to choose another `tailscale.serve_port` or resolve the conflict manually.
-
-### Migrate away from a custom wrapper
-
-Suppose a repository currently starts development through a wrapper like this:
-
-```bash
-TAILSCALE_IP=$(tailscale ip -4)
-tailscale serve --tcp="$CADDY_PORT" --bg --yes "tcp://localhost:$CADDY_PORT"
-DEVTREE_PUBLIC_HOSTNAME="web-ui.$TAILSCALE_IP.sslip.io" pnpm devtree dev
-```
-
-Delete that wrapper and run the interactive setup:
-
-```bash
-pnpm devtree setup --interactive
-```
-
-Commit `.devtree.yml`, leave `.devtree.local.yml` uncommitted, and use `pnpm devtree dev`. Devtree now discovers the Tailscale IPv4 address, validates the application hostname, owns the Serve lifecycle, persists the resolved URL, and prints it during startup and through `devtree info`.
-
-## Add Docker services for each worktree
-
-Once the basic setup is working, Devtree can also keep databases, caches, and other Docker services separate between worktrees.
-
-Install Docker and make sure it is running before continuing.
-
-The important part is that the application and Docker Compose receive the same worktree-specific values:
-
-```text
-Current worktree
-  ↓
-Devtree writes .env.local
-  ├── Vite reads DATABASE_URL and REDIS_URL
-  └── Docker Compose reads DATABASE_PORT and REDIS_PORT
-        ↓
-      Separate containers, network, and volumes
-```
-
-### 1. Add the services to `docker-compose.yml`
-
-```yaml
-services:
-  database:
-    image: postgres:17
-    ports:
-      - "${DATABASE_PORT}:5432"
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
-      interval: 2s
-      timeout: 2s
-      retries: 20
-    volumes:
-      - database-data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7
-    ports:
-      - "${REDIS_PORT}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 2s
-      timeout: 2s
-      retries: 20
-
-volumes:
-  database-data:
-```
-
-### 2. Add the environment values and Compose dependency
-
-Update `devtree.config.ts`:
+The primary checkout defaults to `default`. A linked worktree prefers the branch name and falls back to the worktree name. Override that policy with a resolver:
 
 ```ts
-import { define_devtree_config } from "devtree";
-
 export default define_devtree_config({
-  app_name: "web-ui",
+  project_name: "acme-cloud",
 
-  dev_server: {
-    runner: "vite",
+  session: {
+    name: ({ default_name, branch_name }) => branch_name?.replace(/^feature\//, "") ?? default_name,
   },
+
+  // ...
+});
+```
+
+`--name` has higher precedence than the resolver.
+
+## Multiple web endpoints
+
+One development command may start several services. Declare every web endpoint that Devtree should route:
+
+```ts
+export default define_devtree_config({
+  project_name: "acme-cloud",
+
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
+
+    api: {
+      target: ({ instance }) => ({
+        kind: "port",
+        host: "127.0.0.1",
+        port: instance.allocate_port("api", 3000),
+      }),
+    },
+  },
+
+  // ...
+});
+```
+
+Exactly one endpoint is primary and exactly one endpoint targets the Devtree-managed Vite process. Other endpoints target fixed local ports. They may be started by Turbo, another task runner, or a `pre_dev` hook; Devtree owns their public routes, not their child-process lifecycle.
+
+Endpoint information is available to environment callbacks:
+
+```ts
+env: {
+  provider: "dotenv",
+  entries: ({ instance }) => [
+    { kind: "value", key: "UI_URL", value: instance.endpoints.ui.public_url },
+    { kind: "value", key: "API_URL", value: instance.endpoints.api.public_url },
+  ],
+},
+```
+
+`instance.public_url` and `instance.public_hostname` refer to the primary endpoint.
+
+Customize complete endpoint hostnames with the routing resolver:
+
+```ts
+routing: {
+  hostname: ({ project_name, session_name, endpoint_name, is_primary_endpoint }) => {
+    const endpoint = is_primary_endpoint ? "" : `-${endpoint_name}`;
+    return `${session_name}${endpoint}.${project_name}.internal.example`;
+  },
+},
+```
+
+## Dependency stacks
+
+Dependencies are owned by a named session and may be reused by other sessions in the same project.
+
+Application ports and dependency ports use different allocation scopes:
+
+```ts
+export default define_devtree_config({
+  project_name: "acme-cloud",
 
   env: {
     provider: "dotenv",
-    entries: ({ instance }) => {
-      const database_port = instance.allocate_port("postgres", 5400);
-      const redis_port = instance.allocate_port("redis", 6300);
+    entries: ({ instance, dependencies }) => {
+      const api_port = instance.allocate_port("api", 3000);
+      const database_port = dependencies.allocate_port("postgres", 5400);
+      const redis_port = dependencies.allocate_port("redis", 6300);
 
       return [
-        {
-          kind: "value",
-          key: "APP_URL",
-          value: instance.public_url,
-        },
-        {
-          kind: "value",
-          key: "DATABASE_PORT",
-          value: String(database_port),
-        },
+        { kind: "value", key: "API_PORT", value: String(api_port) },
+        { kind: "value", key: "DATABASE_PORT", value: String(database_port) },
         {
           kind: "value",
           key: "DATABASE_URL",
           value: `postgresql://app:app@127.0.0.1:${database_port}/app`,
         },
-        {
-          kind: "value",
-          key: "REDIS_PORT",
-          value: String(redis_port),
-        },
+        { kind: "value", key: "REDIS_PORT", value: String(redis_port) },
         {
           kind: "value",
           key: "REDIS_URL",
@@ -510,62 +289,235 @@ export default define_devtree_config({
       services: ["database", "redis"],
     },
   ],
+
+  // ...
 });
 ```
 
-Devtree chooses stable ports for the current worktree and writes them to that worktree's `.env.local`. It also gives the Docker Compose project a unique name. Docker then keeps the containers, network, and `database-data` volume separate from every other worktree.
+When a session owns its dependencies, `devtree dev` starts the Compose project and waits for health. The first initialization also runs `setup`, `migrate`, and `post_setup` hooks. Use `devtree setup` to reconcile the owned stack and rerun those hooks explicitly.
 
-Manual values outside the Devtree section of `.env.local` are preserved, so each checkout can still have its own developer overrides.
+When a session reuses another stack, Devtree:
 
-### 3. Start the services
+- resolves dependency ports and Compose names from the owner;
+- verifies that the named stack has been registered;
+- never starts, stops, migrates, or reconfigures it;
+- runs only the consumer session's `pre_dev` hooks.
 
-Run:
+Command dependencies are not shareable because they have no declarative resource or health contract. A session may own command dependencies, but attempting to reuse them fails clearly.
+
+Only an owner may run lifecycle-changing dependency commands:
 
 ```bash
-pnpm devtree setup
-pnpm devtree dev
+pnpm devtree deps start
+pnpm devtree deps stop
 ```
 
-`setup` writes `.env.local`, passes those values to Docker Compose, starts PostgreSQL and Redis, and waits for them to be ready. The application then starts with matching connection URLs.
+Consumers may inspect Compose logs but cannot stop another session's stack.
+Owners also cannot stop, set up, or migrate a stack while any live session is
+using it.
 
-Create another worktree and run the same two commands there. It receives different ports and a different Docker Compose project automatically.
+## Inspect sessions
 
-When a worktree is deleted, preview and remove anything it left behind with:
+List every live Devtree session from any directory:
+
+```bash
+pnpx devtree list
+pnpx devtree list --json
+```
+
+```text
+PROJECT     SESSION            STATUS   DEPS       URL                                                PATH
+acme-cloud  default            running  self       http://acme-cloud.localhost:1355                    ~/code/acme-cloud
+acme-cloud  billing-redesign   running  default    http://billing-redesign.acme-cloud.localhost:1355   /tmp/acme-billing
+```
+
+The JSON output includes the project, session, dependency owner, every endpoint, process IDs, routing provider, and worktree path.
+
+Inspect the current checkout and resolved options with:
+
+```bash
+pnpm devtree info
+pnpm devtree info --name billing-redesign --deps default
+```
+
+`info` prints every endpoint and the resolved dependency owner.
+
+Environment registration is enabled by default. Disable it in `.devtree.yml` when a project must not appear in the machine-wide list:
+
+```yaml
+version: 1
+registry:
+  enabled: false
+```
+
+## Portless and Caddy
+
+Portless is the default provider. Devtree allocates a stable local port for the managed Vite process, registers one Portless alias for every endpoint, and removes only those aliases when the session exits.
+
+For custom domains and access over Tailscale, run:
+
+```bash
+pnpm devtree setup --interactive
+```
+
+The Clack wizard configures Caddy, the shared development domain, the machine name, and Tailscale proxy routing. It writes shared settings to `.devtree.yml` and machine-specific settings to the ignored `.devtree.local.yml`.
+
+Example configuration:
+
+```yaml
+version: 1
+routing:
+  provider: caddy
+  base_domain: dev.example.com
+  port: 1355
+  https: false
+tailscale:
+  enabled: true
+  mode: proxy
+```
+
+```yaml
+# .devtree.local.yml
+version: 1
+routing:
+  machine_name: alice
+```
+
+Create this wildcard DNS record:
+
+```text
+*.alice.dev.example.com → 100.101.102.103
+```
+
+One Caddy process and one Tailscale TCP mapping serve every project, session, and endpoint. Devtree creates one Caddy route per endpoint and removes only the current session's routes when it exits.
+
+When using hosts files instead of wildcard DNS, print every endpoint entry for
+the resolved or explicitly named session:
+
+```bash
+pnpm devtree hosts
+pnpm devtree hosts --name billing-redesign
+```
+
+Inspect or remove Devtree's owned Tailscale mapping:
+
+```bash
+pnpm devtree tailscale status
+pnpm devtree tailscale remove
+```
+
+## Environment files
+
+Devtree writes managed values to `.env.local` by default. Existing content outside the managed block is preserved.
+
+Every app process receives runtime variables including:
+
+```text
+DEVTREE_ACTIVE=1
+DEVTREE_PROJECT_NAME=acme-cloud
+DEVTREE_SESSION_NAME=billing-redesign
+DEVTREE_DEPENDENCY_OWNER=default
+DEVTREE_PUBLIC_URL=http://billing-redesign.acme-cloud.localhost:1355
+DEVTREE_PUBLIC_HOSTNAME=billing-redesign.acme-cloud.localhost
+```
+
+Endpoint-specific values belong in the project's explicit `env.entries` callback because projects choose their own variable names.
+
+## Cleanup
+
+Preview and remove dependency resources left by deleted worktrees:
 
 ```bash
 pnpm devtree gc --dry-run
 pnpm devtree gc
 ```
 
-## Daily workflow
+Garbage collection understands named dependency ownership and live consumers. It never removes a stack that belongs to an existing owner worktree or is used by a live session.
+
+## Upgrade from Devtree 0.4
+
+This release intentionally breaks the 0.4 configuration and machine-state formats.
+
+Stop every running Devtree process, then run the upgrade assistant from the
+project:
 
 ```bash
-# Prepare a new checkout or worktree
-pnpm devtree setup
-
-# Start the application
-pnpm devtree dev
-
-# Show the active URL and checkout names
-pnpm devtree info
-
-# Preview cleanup after worktrees have been deleted
-pnpm devtree gc --dry-run
+pnpm devtree upgrade
 ```
 
-When something is not reachable, start with:
+The Clack assistant:
 
-```bash
-pnpm devtree doctor
+- chooses the new project name and primary endpoint name;
+- replaces `app_name` and `namespace` with `project_name`;
+- adds the primary development-server endpoint;
+- lets you choose which `instance.allocate_port(...)` calls belong to the
+  reusable dependency stack;
+- adds `dependencies` to the matching callback parameters;
+- backs up `devtree.config.ts` before writing it;
+- moves legacy machine state into a timestamped directory under
+  `~/.devtree/backups` instead of deleting it;
+- reports the remaining manual changes it can detect.
+
+The command refuses to continue while a registered Devtree process is still
+alive. It does not delete Docker containers or volumes. Legacy Compose project
+names are included in the final report so you can remove them after checking
+whether their data is still needed.
+
+The command is safe to run again. When the config and machine state are already
+current, it exits without writing or prompting for confirmation.
+
+The assistant deliberately leaves two changes for review because guessing would
+be unsafe:
+
+1. Update custom `routing.hostname` callbacks to handle project, session, and
+   endpoint names.
+2. Replace worktree-specific labels in application code with session names where
+   appropriate.
+
+Before:
+
+```ts
+export default define_devtree_config({
+  app_name: "web-ui",
+  env: {
+    provider: "dotenv",
+    entries: ({ instance }) => {
+      const database_port = instance.allocate_port("postgres", 5400);
+      return [
+        { kind: "value", key: "APP_URL", value: instance.public_url },
+        { kind: "value", key: "DATABASE_PORT", value: String(database_port) },
+      ];
+    },
+  },
+});
 ```
 
-It reports missing environment values, invalid hostnames, Portless or Caddy problems, a disconnected Tailscale client, DNS problems, and Vite settings that would expose the app directly. It does not change DNS or Tailscale permissions.
+After:
 
-## HTTP and HTTPS
+```ts
+export default define_devtree_config({
+  project_name: "web-ui",
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
+  },
+  env: {
+    provider: "dotenv",
+    entries: ({ instance, dependencies }) => {
+      const database_port = dependencies.allocate_port("postgres", 5400);
+      return [
+        { kind: "value", key: "APP_URL", value: instance.public_url },
+        { kind: "value", key: "DATABASE_PORT", value: String(database_port) },
+      ];
+    },
+  },
+});
+```
 
-The default setup and the initial Tailscale setup use plain HTTP on port `1355`. Tailscale encrypts traffic between machines on the Tailscale network.
-
-Trusted HTTPS for custom development domains requires certificates and additional machine setup, so it is not part of the initial setup.
+After reviewing the diff, run `pnpm devtree dev -i` to preview the session,
+dependency owner, and URLs before startup.
 
 ## License
 

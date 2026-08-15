@@ -8,7 +8,7 @@ if (!app_element) {
 
 const configured_url = import.meta.env.VITE_DEVTREE_PUBLIC_URL || window.location.href;
 const public_hostname = import.meta.env.VITE_DEVTREE_PUBLIC_HOSTNAME || window.location.hostname;
-const worktree_name = import.meta.env.VITE_DEVTREE_WORKTREE || "main checkout";
+const session_name = import.meta.env.VITE_DEVTREE_SESSION || "default";
 const database_port = import.meta.env.VITE_DATABASE_PORT || "not configured";
 const redis_port = import.meta.env.VITE_REDIS_PORT || "not configured";
 
@@ -25,8 +25,8 @@ app_element.innerHTML = `
 
     <dl>
       <div>
-        <dt>Checkout</dt>
-        <dd>${worktree_name}</dd>
+        <dt>Session</dt>
+        <dd>${session_name}</dd>
       </div>
       <div>
         <dt>Configured URL</dt>

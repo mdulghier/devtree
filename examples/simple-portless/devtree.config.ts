@@ -1,10 +1,17 @@
 import { define_devtree_config } from "devtree";
 
 export default define_devtree_config({
-  app_name: "simple-demo",
+  project_name: "simple-demo",
 
   dev_server: {
     runner: "vite",
+  },
+
+  endpoints: {
+    ui: {
+      primary: true,
+      target: { kind: "dev-server" },
+    },
   },
 
   env: {
@@ -17,8 +24,8 @@ export default define_devtree_config({
       },
       {
         kind: "value",
-        key: "VITE_DEVTREE_WORKTREE",
-        value: instance.worktree_slug ?? "main checkout",
+        key: "VITE_DEVTREE_SESSION",
+        value: instance.session_name,
       },
     ],
   },

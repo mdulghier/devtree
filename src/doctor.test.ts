@@ -1,17 +1,14 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import type { Devtree_config } from "./config.ts";
-import {
-  get_proxy_mode_configuration_error,
-  is_proxy_tailscale_mode,
-} from "./doctor.ts";
+import { get_proxy_mode_configuration_error, is_proxy_tailscale_mode } from "./doctor.ts";
 
 function create_config(): Devtree_config {
   return {
-    app_name: "demo-app",
+    project_name: "demo-app",
     routing: {
       provider: { kind: "caddy" },
-      hostname: ({ app_name }) => `${app_name}.alice.devtree.test`,
+      hostname: ({ project_name }) => `${project_name}.alice.devtree.test`,
     },
     tailscale: {
       enabled: true,
@@ -40,18 +37,14 @@ describe("proxy mode doctor configuration", () => {
     const config = create_config();
     config.tailscale = { enabled: false, mode: "proxy" };
 
-    expect(get_proxy_mode_configuration_error(config)).toContain(
-      "tailscale.enabled is not true",
-    );
+    expect(get_proxy_mode_configuration_error(config)).toContain("tailscale.enabled is not true");
   });
 
   test("rejects explicitly configured direct exposure with Caddy routing", () => {
     const config = create_config();
     config.tailscale = { enabled: true, mode: "direct" };
 
-    expect(get_proxy_mode_configuration_error(config)).toContain(
-      'tailscale.mode to be "proxy"',
-    );
+    expect(get_proxy_mode_configuration_error(config)).toContain('tailscale.mode to be "proxy"');
   });
 
   test("requires a complete hostname resolver", () => {

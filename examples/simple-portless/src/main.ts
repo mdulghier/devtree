@@ -7,7 +7,7 @@ if (!app_element) {
 }
 
 const configured_url = import.meta.env.VITE_DEVTREE_PUBLIC_URL || window.location.href;
-const worktree_name = import.meta.env.VITE_DEVTREE_WORKTREE || "main checkout";
+const session_name = import.meta.env.VITE_DEVTREE_SESSION || "default";
 
 app_element.innerHTML = `
   <section class="card">
@@ -20,8 +20,8 @@ app_element.innerHTML = `
 
     <dl>
       <div>
-        <dt>Checkout</dt>
-        <dd>${worktree_name}</dd>
+        <dt>Session</dt>
+        <dd>${session_name}</dd>
       </div>
       <div>
         <dt>Configured URL</dt>

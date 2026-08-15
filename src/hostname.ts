@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type {
-  Devtree_config,
-  Portless_hostname_context,
-  Resolved_env_map,
-} from "./config.ts";
+import type { Devtree_config, Portless_hostname_context, Resolved_env_map } from "./config.ts";
 import { resolve_routing } from "./routing.ts";
 
 const DNS_LABEL_MAX_LENGTH = 63;
@@ -28,7 +24,7 @@ function add_hash_suffix(value: string, source: string, max_length: number) {
 
   if (prefix_length < 1) {
     throw new Error(
-      `Cannot create a collision-resistant worktree hostname label within ${max_length} characters. Shorten app_name.`,
+      `Cannot create a collision-resistant hostname label within ${max_length} characters. Shorten project_name.`,
     );
   }
 
@@ -37,31 +33,35 @@ function add_hash_suffix(value: string, source: string, max_length: number) {
   return prefix ? `${prefix}-${hash_suffix}` : hash_suffix;
 }
 
-export function create_portless_worktree_slug(
+export function create_identity_slug(
   identity: string | null,
-  app_name: string,
   fallback_seed: string,
+  source_name = "name",
 ) {
-  const max_length = DNS_LABEL_MAX_LENGTH - app_name.length - 2;
-
-  if (max_length < HASH_LENGTH + 2) {
-    throw new Error(
-      `app_name "${app_name}" is too long to combine with a worktree slug in one DNS label.`,
-    );
-  }
-
-  const source = identity?.trim() || `worktree-${fallback_seed}`;
+  const source = identity?.trim() || `session-${fallback_seed}`;
   const normalized = slugify(source);
 
   if (!normalized) {
-    return add_hash_suffix("worktree", source, max_length);
+    return add_hash_suffix("session", source, DNS_LABEL_MAX_LENGTH);
   }
 
-  if (normalized !== source || normalized.length > max_length) {
-    return add_hash_suffix(normalized, source, max_length);
+  if (normalized !== source || normalized.length > DNS_LABEL_MAX_LENGTH) {
+    return add_hash_suffix(normalized, source, DNS_LABEL_MAX_LENGTH);
+  }
+
+  if (!normalized) {
+    throw new Error(`${source_name} must contain a letter or number.`);
   }
 
   return normalized;
+}
+
+export function join_identity_slugs(identities: string[]) {
+  const combined = identities.join("--");
+
+  return combined.length <= DNS_LABEL_MAX_LENGTH
+    ? combined
+    : add_hash_suffix(combined, combined, DNS_LABEL_MAX_LENGTH);
 }
 
 export function validate_public_hostname(hostname: string, source = "public hostname") {
@@ -106,9 +106,7 @@ export function resolve_configured_public_hostname(
   config: Devtree_config,
   context: Portless_hostname_context,
 ) {
-  const hostname_resolver = config.routing
-    ? config.routing.hostname
-    : config.portless?.hostname;
+  const hostname_resolver = config.routing ? config.routing.hostname : config.portless?.hostname;
 
   if (!hostname_resolver) {
     return null;
@@ -147,15 +145,19 @@ export function resolve_configured_public_hostname(
   return validate_public_hostname(hostname, setting_name);
 }
 
-export function resolve_legacy_public_hostname(
-  app_name: string,
-  route_prefix: string | null,
+export function resolve_default_public_hostname(
+  context: Portless_hostname_context,
   env: Resolved_env_map = process.env,
 ) {
   const tld = env.PORTLESS_TLD?.trim() || "localhost";
-  const host = route_prefix ? `${route_prefix}.${app_name}` : app_name;
+  const labels = [
+    ...(context.is_default_session ? [] : [context.session_name]),
+    ...(context.is_primary_endpoint ? [] : [context.endpoint_name]),
+    context.project_name,
+    tld,
+  ];
 
-  return validate_public_hostname(`${host}.${tld}`.toLowerCase(), "Portless public hostname");
+  return validate_public_hostname(labels.join(".").toLowerCase(), "Devtree public hostname");
 }
 
 export function resolve_portless_https(
@@ -165,10 +167,7 @@ export function resolve_portless_https(
   return resolve_routing(config, env).https;
 }
 
-export function resolve_portless_port(
-  config: Devtree_config,
-  env: Resolved_env_map = process.env,
-) {
+export function resolve_portless_port(config: Devtree_config, env: Resolved_env_map = process.env) {
   return resolve_routing(config, env).port;
 }
 

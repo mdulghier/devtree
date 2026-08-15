@@ -146,6 +146,7 @@ export function ensure_env_file(
   const managed_entries = loaded_config.config.env.entries({
     config: loaded_config.config,
     instance,
+    dependencies: instance.dependencies,
     existing_env_values: existing_env.env_values,
   });
   const managed_block = [

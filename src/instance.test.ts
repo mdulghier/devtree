@@ -1,17 +1,28 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { describe, expect, test } from "vite-plus/test";
 
-import { create_devtree_instance } from "./instance.ts";
 import type { Loaded_devtree_config } from "./config.ts";
+import { create_devtree_instance } from "./instance.ts";
 
 function create_loaded_config(repo_root: string): Loaded_devtree_config {
   return {
     config: {
-      app_name: "demo-app",
-      namespace: "demo-app",
+      project_name: "acme-cloud",
+      endpoints: {
+        ui: {
+          primary: true,
+          target: { kind: "dev-server" },
+        },
+        api: {
+          target: ({ instance }) => ({
+            kind: "port",
+            port: instance.allocate_port("api", 3000),
+          }),
+        },
+      },
       env: {
         provider: "dotenv",
         entries: () => [],
@@ -23,145 +34,95 @@ function create_loaded_config(repo_root: string): Loaded_devtree_config {
 }
 
 describe("create_devtree_instance", () => {
-  test("keeps the legacy main-checkout public URL", () => {
+  test("creates the default session and endpoint URLs", () => {
     const instance = create_devtree_instance(create_loaded_config("/tmp/devtree-main-checkout"));
 
-    expect(instance.public_hostname).toBe("demo-app.localhost");
-    expect(instance.public_url).toBe("http://demo-app.localhost:1355");
+    expect(instance.project_name).toBe("acme-cloud");
+    expect(instance.session_name).toBe("default");
+    expect(instance.dependencies.owns).toBe(true);
+    expect(instance.public_hostname).toBe("acme-cloud.localhost");
+    expect(instance.endpoints.api?.public_hostname).toBe("api.acme-cloud.localhost");
   });
 
-  test("uses the configured canonical hostname as the URL source of truth", () => {
-    const loaded_config = create_loaded_config("/tmp/devtree-canonical-checkout");
+  test("uses an explicit session name in every endpoint hostname", () => {
+    const instance = create_devtree_instance(create_loaded_config("/tmp/devtree-named-checkout"), {
+      session_name: "billing",
+    });
 
-    loaded_config.config.portless = {
-      hostname: ({ app_name }) => `${app_name}.developer.dev.example.com`,
-      port: 1355,
-      https: false,
-    };
-
-    const instance = create_devtree_instance(loaded_config);
-
-    expect(instance.public_hostname).toBe("demo-app.developer.dev.example.com");
-    expect(instance.public_url).toBe("http://demo-app.developer.dev.example.com:1355");
+    expect(instance.public_hostname).toBe("billing.acme-cloud.localhost");
+    expect(instance.endpoints.api?.public_hostname).toBe("billing.api.acme-cloud.localhost");
   });
 
-  test("uses routing.hostname as the Caddy route and URL source of truth", () => {
-    const loaded_config = create_loaded_config("/tmp/devtree-caddy-checkout");
+  test("uses routing.hostname for every endpoint", () => {
+    const loaded_config = create_loaded_config("/tmp/devtree-custom-hostname");
 
     loaded_config.config.routing = {
-      provider: { kind: "caddy" },
-      hostname: ({ app_name }) => `${app_name}.alice.dev.example.com`,
-      port: 1355,
-      https: false,
+      hostname: ({ session_name, endpoint_name, project_name }) =>
+        `${session_name}-${endpoint_name}.${project_name}.example.com`,
     };
 
-    const instance = create_devtree_instance(loaded_config);
+    const instance = create_devtree_instance(loaded_config, {
+      session_name: "billing",
+    });
 
-    expect(instance.routing_provider).toBe("caddy");
-    expect(instance.routing_enabled).toBe(true);
-    expect(instance.portless_enabled).toBe(false);
-    expect(instance.public_hostname).toBe("demo-app.alice.dev.example.com");
-    expect(instance.public_url).toBe("http://demo-app.alice.dev.example.com:1355");
+    expect(instance.public_hostname).toBe("billing-ui.acme-cloud.example.com");
+    expect(instance.endpoints.api?.public_hostname).toBe("billing-api.acme-cloud.example.com");
   });
 
-  test("uses localhost for new routing config without a custom hostname", () => {
-    const loaded_config = create_loaded_config("/tmp/devtree-caddy-localhost");
-    const previous_tld = process.env.PORTLESS_TLD;
-
-    loaded_config.config.routing = {
-      provider: { kind: "caddy" },
-    };
-    process.env.PORTLESS_TLD = "legacy.example.com";
+  test("derives a linked worktree session and reuses default dependencies", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
 
     try {
-      const instance = create_devtree_instance(loaded_config);
+      writeFileSync(
+        resolve(repo_root, ".git"),
+        "gitdir: /tmp/acme-cloud/.git/worktrees/feature-123\n",
+      );
 
-      expect(instance.public_hostname).toBe("demo-app.localhost");
+      const instance = create_devtree_instance(create_loaded_config(repo_root));
+
+      expect(instance.session_name).toBe("feature-123");
+      expect(instance.dependency_owner).toBe("default");
+      expect(instance.dependencies.owns).toBe(false);
+      expect(instance.public_hostname).toBe("feature-123.acme-cloud.localhost");
     } finally {
-      if (previous_tld === undefined) {
-        delete process.env.PORTLESS_TLD;
-      } else {
-        process.env.PORTLESS_TLD = previous_tld;
-      }
+      rmSync(repo_root, { force: true, recursive: true });
     }
   });
 
-  test("keeps the legacy worktree URL shape", () => {
-    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
-    const loaded_config = create_loaded_config(repo_root);
+  test("can give a worktree its own dependency scope", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-isolated-"));
 
-    writeFileSync(
-      resolve(repo_root, ".git"),
-      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
-    );
+    try {
+      writeFileSync(
+        resolve(repo_root, ".git"),
+        "gitdir: /tmp/acme-cloud/.git/worktrees/isolated\n",
+      );
 
-    const instance = create_devtree_instance(loaded_config);
+      const instance = create_devtree_instance(create_loaded_config(repo_root), {
+        own_dependencies: true,
+      });
 
-    expect(instance.public_hostname).toBe("feature-123.demo-app.localhost");
-    expect(instance.public_url).toBe("http://feature-123.demo-app.localhost:1355");
-
-    rmSync(repo_root, { force: true, recursive: true });
+      expect(instance.dependency_owner).toBe("isolated");
+      expect(instance.dependencies.owns).toBe(true);
+    } finally {
+      rmSync(repo_root, { force: true, recursive: true });
+    }
   });
 
-  test("detects a worktree when the Devtree project is inside the Git worktree", () => {
-    const git_root = mkdtempSync(resolve(tmpdir(), "devtree-nested-example-"));
-    const repo_root = resolve(git_root, "examples", "simple-portless");
+  test("keeps session and dependency allocations separate", () => {
+    const loaded_config = create_loaded_config("/tmp/devtree-port-scope");
+    const consumer = create_devtree_instance(loaded_config, {
+      session_name: "consumer",
+      dependency_owner: "default",
+    });
+    const other_consumer = create_devtree_instance(loaded_config, {
+      session_name: "other",
+      dependency_owner: "default",
+    });
 
-    mkdirSync(repo_root, { recursive: true });
-    writeFileSync(
-      resolve(git_root, ".git"),
-      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
+    expect(consumer.dependencies.allocate_port("db", 5400)).toBe(
+      other_consumer.dependencies.allocate_port("db", 5400),
     );
-
-    const instance = create_devtree_instance(create_loaded_config(repo_root));
-
-    expect(instance.worktree_slug).toBe("feature-123");
-    expect(instance.public_hostname).toBe("feature-123.demo-app.localhost");
-
-    rmSync(git_root, { force: true, recursive: true });
-  });
-
-  test("passes a flattened worktree identity to the canonical hostname callback", () => {
-    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-feature-123-"));
-    const loaded_config = create_loaded_config(repo_root);
-
-    loaded_config.config.portless = {
-      hostname: ({ app_name, worktree_slug }) => {
-        const route_name = worktree_slug ? `${worktree_slug}--${app_name}` : app_name;
-
-        return `${route_name}.developer.dev.example.com`;
-      },
-    };
-    writeFileSync(
-      resolve(repo_root, ".git"),
-      "gitdir: /tmp/demo-app/.git/worktrees/feature-123\n",
-    );
-
-    const instance = create_devtree_instance(loaded_config);
-
-    expect(instance.public_hostname).toBe(
-      "feature-123--demo-app.developer.dev.example.com",
-    );
-
-    rmSync(repo_root, { force: true, recursive: true });
-  });
-
-  test("creates deterministic instance ids and scoped names", () => {
-    const first_instance = create_devtree_instance(create_loaded_config("/tmp/worktree-one"));
-    const second_instance = create_devtree_instance(create_loaded_config("/tmp/worktree-one"));
-    const third_instance = create_devtree_instance(create_loaded_config("/tmp/worktree-two"));
-
-    expect(first_instance.instance_id).toBe(second_instance.instance_id);
-    expect(first_instance.scoped_name).toBe(second_instance.scoped_name);
-    expect(first_instance.instance_id).not.toBe(third_instance.instance_id);
-  });
-
-  test("allocates stable ports per name", () => {
-    const instance = create_devtree_instance(create_loaded_config("/tmp/worktree-one"));
-
-    expect(instance.allocate_port("db", 5600, 1000)).toBe(instance.allocate_port("db", 5600, 1000));
-    expect(instance.allocate_port("db", 5600, 1000)).not.toBe(
-      instance.allocate_port("redis", 5600, 1000),
-    );
+    expect(consumer.allocate_port("api", 3000)).not.toBe(other_consumer.allocate_port("api", 3000));
   });
 });
