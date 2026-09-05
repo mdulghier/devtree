@@ -1,33 +1,84 @@
 name: npm-publish
+run-name: ${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'verify' && format('{0} from {1} {2}', inputs.channel, github.ref_name, inputs.request_id) || format('Verify {0}', github.ref_name) }}
 
 on:
   pull_request:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
-      publish_preview:
-        description: Publish a preview release to npm
+      channel:
+        description: Action (prepare and stable require main)
         required: true
-        type: boolean
-        default: false
-      preview_identifier:
-        description: Optional preview version identifier. Defaults to the short commit SHA.
+        type: choice
+        options:
+          - verify
+          - prepare
+          - preview
+          - stable
+        default: verify
+      request_id:
+        description: Correlation ID used by the local release command
+        required: false
+        type: string
+      expected_sha:
+        description: Expected commit SHA (set by the local release command)
         required: false
         type: string
 
+# Checks can supersede checks, but never cancel an active publication.
+# Serialize each channel across branches because its npm dist-tag is shared.
 concurrency:
-  group: npm-publish-${{ github.ref }}
-  cancel-in-progress: true
+  group: npm-${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'verify' && format('publish-{0}', inputs.channel) || format('verify-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.channel == 'verify' }}
 
 jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'prepare'))
+    needs: verify
+    concurrency:
+      group: release-please-prepare
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    steps:
+      - name: Prepare version and changelog pull request
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          skip-github-release: true
+
+      # GITHUB_TOKEN-created PRs do not trigger pull_request workflows.
+      - name: Verify the release pull request explicitly
+        if: steps.release.outputs.pr != ''
+        uses: actions/github-script@v7
+        env:
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        with:
+          script: |
+            const pr = JSON.parse(process.env.RELEASE_PR);
+            const { data } = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo, pull_number: pr.number,
+            });
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'npm-publish.yml',
+              ref: data.head.ref,
+              inputs: { channel: 'verify', expected_sha: data.head.sha },
+            });
+
   verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Check out repository
@@ -43,31 +94,85 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Validate release request
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          assert(['verify', 'prepare', 'stable', 'preview'].includes(process.env.CHANNEL), 'Invalid release channel');
+          assert(!process.env.EXPECTED_SHA || process.env.EXPECTED_SHA === process.env.GITHUB_SHA,
+            'Branch moved since dispatch. Update your checkout and dispatch again.');
+          assert(process.env.GITHUB_REF.startsWith('refs/heads/'), 'Publish from a branch, not a tag');
+          if (['prepare', 'stable'].includes(process.env.CHANNEL)) {
+            assert(process.env.GITHUB_REF === 'refs/heads/main', 'Preparation and stable releases require main');
+          }
+          JS
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify package
         run: pnpm run ci
 
-      - name: Set preview version
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_preview
+      - name: Set release version
+        id: version
         env:
-          PREVIEW_IDENTIFIER: ${{ inputs.preview_identifier }}
+          CHANNEL: ${{ inputs.channel }}
         run: |
-          preview_identifier="${PREVIEW_IDENTIFIER:-${GITHUB_SHA::7}}"
-          preview_identifier="$(printf '%s' "$preview_identifier" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9a-z-]+/-/g; s/^-+//; s/-+$//')"
-
-          if [ -z "$preview_identifier" ]; then
-            echo "Preview identifier must contain at least one letter or number." >&2
-            exit 1
-          fi
-
-          current_version="$(node -p "require('./package.json').version")"
-          base_version="${current_version%%-*}"
-          npm version --no-git-tag-version "$base_version-preview.$preview_identifier"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const package_json = JSON.parse(readFileSync('package.json', 'utf8'));
+          const stable_version = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          if (process.env.CHANNEL === 'preview') {
+            const base_version = package_json.version.split('-')[0];
+            assert(stable_version.test(base_version), 'Expected a major.minor.patch base version');
+            package_json.version = `${base_version}-preview.${process.env.GITHUB_RUN_NUMBER}.${process.env.GITHUB_RUN_ATTEMPT}.g${process.env.GITHUB_SHA.slice(0, 7)}`;
+            writeFileSync('package.json', `${JSON.stringify(package_json, null, 2)}\n`);
+          } else if (process.env.CHANNEL === 'stable') {
+            assert(stable_version.test(package_json.version), 'Stable releases require major.minor.patch');
+            const manifest = JSON.parse(readFileSync('.release-please-manifest.json', 'utf8'));
+            assert(manifest['.'] === package_json.version, 'Merge the Release Please PR before publishing');
+            const changelog = readFileSync('CHANGELOG.md', 'utf8');
+            const heading = changelog.split('\n').find(line => /^##? /.test(line) && /\d+\.\d+\.\d+/.test(line));
+            assert(heading?.match(/\d+\.\d+\.\d+/)?.[0] === package_json.version,
+              'Changelog must start with the version being published');
+            const existing_tag = execFileSync('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${package_json.version}`], { encoding: 'utf8' }).trim();
+            assert(!existing_tag, 'Release tag already exists. Choose a new version or recover the existing run.');
+            const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(package_json.name)}`);
+            if (response.status !== 404) {
+              assert(response.ok, `npm registry returned ${response.status}`);
+              const metadata = await response.json();
+              assert(!metadata.versions?.[package_json.version], 'This version is already published');
+              const latest = metadata['dist-tags']?.latest;
+              if (latest) {
+                assert(stable_version.test(latest), 'Unexpected latest version; inspect npm dist-tags');
+                const next_parts = package_json.version.split('.').map(Number);
+                const latest_parts = latest.split('.').map(Number);
+                const difference = next_parts.map((part, index) => part - latest_parts[index]).find(value => value !== 0);
+                assert(difference > 0, `Version must be newer than latest (${latest})`);
+              }
+            }
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${package_json.version}\n`);
+          JS
 
       - name: Pack package artifact
         run: npm pack
+
+      - name: Smoke test packaged install
+        run: |
+          package_path="$(realpath ./*.tgz)"
+          consumer_dir="$(mktemp -d)"
+          cd "$consumer_dir"
+          npm init -y
+          npm install --ignore-scripts "$package_path"
+          ./node_modules/.bin/devtree help
+          node --input-type=module -e "await import('@mdulghier/devtree')"
 
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
@@ -76,72 +181,9 @@ jobs:
           path: '*.tgz'
           if-no-files-found: error
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
-
-    outputs:
-      release_id: ${{ steps.create_release.outputs.release_id }}
-
-    steps:
-      - name: Create GitHub release if needed
-        id: create_release
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const tag = context.ref.replace('refs/tags/', '')
-
-            try {
-              const existing = await github.rest.repos.getReleaseByTag({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag,
-              })
-
-              core.setOutput('release_id', String(existing.data.id))
-            } catch (error) {
-              if (error.status !== 404) throw error
-
-              const created = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: tag,
-                target_commitish: context.sha,
-                name: tag,
-                body: 'Release notes are being generated.',
-                draft: false,
-                prerelease: false,
-              })
-
-              core.setOutput('release_id', String(created.data.id))
-            }
-
-      - name: Dispatch opencode release-notes workflow
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'opencode.yml',
-              ref: context.ref.replace('refs/tags/', ''),
-              inputs: {
-                tag: context.ref.replace('refs/tags/', ''),
-                release_id: `${{ steps.create_release.outputs.release_id }}`,
-              },
-            })
-
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs:
-      - verify
-      - release
+    if: github.event_name == 'workflow_dispatch' && (inputs.channel == 'stable' || inputs.channel == 'preview')
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -160,27 +202,93 @@ jobs:
           name: npm-package
 
       - name: Publish to npm
-        run: npm publish ./*.tgz --provenance --access public
+        env:
+          NPM_TAG: ${{ inputs.channel == 'stable' && 'latest' || 'preview' }}
+        run: npm publish ./*.tgz --provenance --access public --tag "$NPM_TAG"
 
-  publish-preview:
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_preview
-    needs: verify
+      - name: Write installation instructions
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          NPM_TAG: ${{ inputs.channel == 'stable' && 'latest' || 'preview' }}
+        run: |
+          {
+            echo "Published @mdulghier/devtree@$VERSION ($NPM_TAG)."
+            echo
+            echo '```sh'
+            echo "pnpm add -D @mdulghier/devtree@$VERSION"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+    needs: [verify, publish]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write
+      contents: write
+      issues: write
+      pull-requests: read
 
     steps:
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
+      - name: Check out released commit
+        uses: actions/checkout@v4
 
-      - name: Download package artifact
-        uses: actions/download-artifact@v4
+      - name: Create GitHub release after publication
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         with:
-          name: npm-package
+          script: |
+            const tag = `v${process.env.VERSION}`;
+            const changelog = require('node:fs').readFileSync('CHANGELOG.md', 'utf8');
+            const lines = changelog.split('\n');
+            const start = lines.findIndex(line => /^##? /.test(line) && line.match(/\d+\.\d+\.\d+/)?.[0] === process.env.VERSION);
+            if (start < 0) throw new Error('Missing release changelog');
+            const next = lines.findIndex((line, index) => index > start && /^##? /.test(line));
+            const body = lines.slice(start + 1, next < 0 ? undefined : next).join('\n').trim();
+            if (!body) throw new Error('Empty release changelog');
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            // Check tag ownership before reusing an existing release during recovery.
+            try {
+              await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+              const commit = await github.rest.repos.getCommit({ ...repo, ref: tag });
+              if (commit.data.sha !== context.sha) throw new Error('Release tag points to another commit');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              await github.rest.repos.getReleaseByTag({ ...repo, tag });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.repos.createRelease({
+                ...repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: tag,
+                body,
+                draft: false,
+                prerelease: false,
+              });
+            }
 
-      - name: Publish preview to npm
-        run: npm publish ./*.tgz --provenance --access public --tag preview
+      - name: Mark the Release Please pull request as released
+        uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        with:
+          script: |
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              ...repo, state: 'closed', labels: 'autorelease: pending', per_page: 100,
+            });
+            for (const issue of issues) {
+              if (!issue.pull_request) continue;
+              const { data: pr } = await github.rest.pulls.get({ ...repo, pull_number: issue.number });
+              if (!pr.merged || pr.base.ref !== 'main') continue;
+              const { data: file } = await github.rest.repos.getContent({
+                ...repo, path: '.release-please-manifest.json', ref: pr.merge_commit_sha,
+              });
+              const manifest = JSON.parse(Buffer.from(file.content, 'base64').toString());
+              if (manifest['.'] !== process.env.VERSION) continue;
+              await github.rest.issues.addLabels({ ...repo, issue_number: pr.number, labels: ['autorelease: tagged'] });
+              await github.rest.issues.removeLabel({ ...repo, issue_number: pr.number, name: 'autorelease: pending' });
+            }

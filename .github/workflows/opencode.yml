@@ -5,16 +5,6 @@ on:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Release tag to document
-        required: true
-        type: string
-      release_id:
-        description: GitHub release id to update
-        required: true
-        type: string
 
 jobs:
   opencode:
@@ -45,46 +35,3 @@ jobs:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:
           model: opencode/glm-5.1
-
-  release:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-      pull-requests: write
-      issues: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag }}
-          persist-credentials: false
-
-      - name: Run opencode release automation
-        uses: anomalyco/opencode/github@latest
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          model: opencode/glm-5.1
-          use_github_token: true
-          prompt: |
-            Update the body of the existing GitHub release for the dispatched tag.
-
-            Requirements:
-            - Use the dispatched release tag `${{ inputs.tag }}` as the release tag.
-            - Inspect `package.json` and verify its `version` matches `${{ inputs.tag }}` without the leading `v`.
-            - If the dispatched tag and `package.json` version do not match, fail without modifying the release.
-            - Inspect the existing GitHub releases and tags.
-            - A GitHub release for this tag already exists. Its release id is `${{ inputs.release_id }}`.
-            - Find the previous release before `${{ inputs.tag }}` and read all commits from that release up to the tagged commit.
-            - Write concise, high-quality release notes that summarize the user-facing changes and group related work where appropriate.
-            - Update only the release title and body for release id `${{ inputs.release_id }}`.
-            - Do not modify repository files, do not open a pull request, and do not publish to npm.
-
-            Release note expectations:
-            - Start with a short summary paragraph.
-            - Then include a bullet list of the most important changes.
-            - Base the notes on the actual commits since the last release, not generic boilerplate.
