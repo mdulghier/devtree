@@ -1,6 +1,7 @@
 import { autocomplete, cancel, intro, isCancel, note, outro, text } from "@clack/prompts";
 
 import type { Loaded_devtree_config } from "./config.ts";
+import { list_environment_sessions } from "./environment-registry.ts";
 import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
 import { list_registered_dependency_owners } from "./registry.ts";
 
@@ -163,19 +164,39 @@ export async function resolve_session_instance(
   provided_prompts?: Prompt_dependencies,
 ): Promise<Devtree_instance | null> {
   if (!parsed_options.interactive) {
-    return create_devtree_instance(loaded_config, {
+    const default_instance = create_devtree_instance(loaded_config, {
       session_name: parsed_options.session_name,
       dependency_owner: parsed_options.dependency_owner,
+      own_dependencies: parsed_options.own_dependencies,
+    });
+    const active_sessions = list_environment_sessions().filter(
+      (session) =>
+        session.project_name === default_instance.project_name &&
+        session.worktree_path === default_instance.worktree_path &&
+        (!parsed_options.session_name || session.session_name === default_instance.session_name),
+    );
+
+    if (active_sessions.length > 1) {
+      throw new Error("Multiple live sessions match this checkout. Select one with --name.");
+    }
+
+    const active_session = active_sessions[0];
+    if (!active_session) {
+      return default_instance;
+    }
+
+    return create_devtree_instance(loaded_config, {
+      session_name: active_session.session_name,
+      dependency_owner: parsed_options.dependency_owner ?? active_session.dependency_owner,
       own_dependencies: parsed_options.own_dependencies,
     });
   }
 
   const prompts = provided_prompts ?? get_default_prompt_dependencies();
-  const initial_instance = create_devtree_instance(loaded_config, {
-    session_name: parsed_options.session_name,
-    dependency_owner: parsed_options.dependency_owner,
-    own_dependencies: parsed_options.own_dependencies,
-  });
+  const initial_instance = (await resolve_session_instance(loaded_config, {
+    ...parsed_options,
+    interactive: false,
+  }))!;
 
   prompts.intro("Devtree");
 
@@ -194,14 +215,18 @@ export async function resolve_session_instance(
 
   let dependency_owner = parsed_options.dependency_owner;
   let own_dependencies = parsed_options.own_dependencies;
-  let named_instance = create_devtree_instance(loaded_config, {
+  let named_instance = (await resolve_session_instance(loaded_config, {
+    ...parsed_options,
+    interactive: false,
     session_name,
     dependency_owner,
     own_dependencies,
-  });
+  }))!;
 
   if (!dependency_owner && !own_dependencies) {
-    const default_owner = named_instance.is_main_checkout ? "__self__" : "default";
+    const default_owner = named_instance.dependencies.owns
+      ? "__self__"
+      : named_instance.dependency_owner;
     const answer = await prompts.ask_dependency_owner(
       get_dependency_options(named_instance),
       default_owner,

@@ -132,9 +132,10 @@ function get_managed_env_values(entries: Managed_env_entry[]) {
   return managed_env_values;
 }
 
-export function ensure_env_file(
+export function resolve_env_file(
   loaded_config: Loaded_devtree_config,
   instance: Devtree_instance,
+  write = false,
 ): Ensure_env_file_result {
   const markers = get_block_markers(loaded_config.config.env.managed_block_id);
   const existing_env = read_existing_env_file(
@@ -158,7 +159,7 @@ export function ensure_env_file(
   const next_file_text =
     [managed_block, existing_env.custom_text].filter(Boolean).join("\n\n") + "\n";
 
-  if (next_file_text !== existing_env.file_text) {
+  if (write && next_file_text !== existing_env.file_text) {
     writeFileSync(instance.env_file_path, next_file_text);
   }
 
@@ -182,4 +183,8 @@ export function get_env_file_status_message(result: Ensure_env_file_result) {
   }
 
   return `${result.env_file_path} is already up to date`;
+}
+
+export function ensure_env_file(loaded_config: Loaded_devtree_config, instance: Devtree_instance) {
+  return resolve_env_file(loaded_config, instance, true);
 }

@@ -23,7 +23,7 @@ import {
   type Dev_server_runner,
 } from "./command-builder.ts";
 import { get_proxy_mode_configuration_error, is_proxy_tailscale_mode } from "./doctor.ts";
-import { ensure_env_file, get_env_file_status_message } from "./env-file.ts";
+import { ensure_env_file, resolve_env_file, get_env_file_status_message } from "./env-file.ts";
 import { format_environment_list, format_environment_list_json } from "./environment-list.ts";
 import {
   assert_environment_session_available,
@@ -82,6 +82,7 @@ type Command_name =
   | "dev"
   | "doctor"
   | "env"
+  | "exec"
   | "gc"
   | "help"
   | "hosts"
@@ -94,7 +95,6 @@ type Command_name =
 type Runtime_state = {
   loaded_config: Loaded_devtree_config;
   instance: Devtree_instance;
-  env_status_message: string;
   managed_env_values: Record<string, string>;
   effective_env_values: Record<string, string>;
   tailscale: Resolved_tailscale;
@@ -111,12 +111,16 @@ function print_help() {
   console.log("  list [--json]           List running Devtree environments on this machine");
   console.log("  tailscale status|remove Inspect or safely remove Devtree's Serve mapping");
   console.log("  hosts [session options] Print endpoint hosts-file entries");
-  console.log("  setup [--interactive]   Configure Devtree, sync env, and start dependencies");
+  console.log(
+    "  setup [-i] [session options]  Configure Devtree, sync env, and start dependencies",
+  );
   console.log("  upgrade                 Upgrade a Devtree 0.4 project interactively");
   console.log("  dev [-i] [--name NAME] [--deps [OWNER] | -d] [-- <vite args>]");
-  console.log("  deps start|stop|logs    Manage configured dependencies");
+  console.log("  deps start|stop|logs [session options]  Manage configured dependencies");
+  console.log("  exec [session options] -- <command>  Run with the session environment");
+  console.log("  Session options: --name NAME, --deps OWNER, -d (own dependencies)");
   console.log("  gc [--dry-run] [-v]     Remove orphaned dependency resources");
-  console.log("  env write|show          Compatibility aliases for env sync and info");
+  console.log("  env write|show [session options]  Sync env or inspect the selected session");
 }
 
 function get_command_name(argv: string[]) {
@@ -181,7 +185,7 @@ function get_runtime_state(
   loaded_config: Loaded_devtree_config,
   instance = create_devtree_instance(loaded_config),
 ) {
-  const env_result = ensure_env_file(loaded_config, instance);
+  const env_result = resolve_env_file(loaded_config, instance);
   const tailscale = resolve_tailscale(loaded_config.config);
   const persisted_tailscale_routing = get_persisted_active_tailscale_routing(instance);
   const active_tailscale_routing =
@@ -194,12 +198,31 @@ function get_runtime_state(
   return {
     loaded_config,
     instance,
-    env_status_message: get_env_file_status_message(env_result),
     managed_env_values: env_result.managed_env_values,
     effective_env_values: env_result.effective_env_values,
     tailscale,
     active_tailscale_routing,
   };
+}
+
+function sync_runtime_env(runtime_state: Runtime_state) {
+  const instance = runtime_state.instance;
+  const conflicting_session = list_environment_sessions().find(
+    (session) =>
+      session.worktree_path === instance.worktree_path &&
+      (session.project_name !== instance.project_name ||
+        session.session_name !== instance.session_name ||
+        session.dependency_owner !== instance.dependency_owner),
+  );
+  if (conflicting_session) {
+    throw new Error(
+      `Cannot rewrite the environment while this checkout runs session "${conflicting_session.session_name}" with dependencies "${conflicting_session.dependency_owner}".`,
+    );
+  }
+  const env_result = ensure_env_file(runtime_state.loaded_config, instance);
+  runtime_state.managed_env_values = env_result.managed_env_values;
+  runtime_state.effective_env_values = env_result.effective_env_values;
+  console.log(get_env_file_status_message(env_result));
 }
 
 function print_tailscale_status(runtime_state: Runtime_state) {
@@ -530,7 +553,7 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
   console.log(`[pass] config ${loaded_config.config_path}`);
 
   try {
-    instance = create_devtree_instance(loaded_config);
+    instance = (await resolve_session_instance(loaded_config, parse_session_options([])))!;
     console.log(`[pass] public hostname ${instance.public_hostname}`);
   } catch (error) {
     issues.push(error instanceof Error ? error.message : String(error));
@@ -1073,13 +1096,25 @@ async function main() {
   let resolved_instance: Devtree_instance | null = null;
   let dev_passthrough_args: string[] = [];
 
-  if (command_name === "dev" || command_name === "info") {
-    const parsed_options = parse_session_options(argv.slice(1));
+  if (["dev", "info", "setup", "deps", "env", "exec"].includes(command_name)) {
+    const option_args = argv.slice(command_name === "deps" || command_name === "env" ? 2 : 1);
+    const parsed_options = parse_session_options(
+      command_name === "setup"
+        ? option_args.filter((arg) => arg !== "-i" && arg !== "--interactive")
+        : option_args,
+    );
 
-    if (command_name === "info" && parsed_options.interactive) {
+    if (command_name !== "dev" && parsed_options.interactive) {
       throw new Error("Interactive session selection is available through `devtree dev -i`.");
     }
 
+    if (
+      command_name !== "dev" &&
+      command_name !== "exec" &&
+      parsed_options.passthrough_args.length > 0
+    ) {
+      throw new Error("Arguments after -- are only supported by dev and exec.");
+    }
     dev_passthrough_args = parsed_options.passthrough_args;
     resolved_instance = await resolve_session_instance(loaded_config, parsed_options);
 
@@ -1090,12 +1125,34 @@ async function main() {
 
   const runtime_state = get_runtime_state(
     loaded_config,
-    resolved_instance ?? create_devtree_instance(loaded_config),
+    resolved_instance ??
+      (await resolve_session_instance(loaded_config, parse_session_options([])))!,
   );
 
   if (command_name === "info") {
-    console.log(runtime_state.env_status_message);
     print_info(runtime_state);
+    return;
+  }
+
+  if (command_name === "exec") {
+    if (dev_passthrough_args.length === 0) {
+      throw new Error("Usage: devtree exec [session options] -- <command> [args]");
+    }
+    const command_parts =
+      loaded_config.config.env.provider === "varlock"
+        ? with_varlock(dev_passthrough_args)
+        : dev_passthrough_args;
+    const [command, ...args] = command_parts;
+    process.exitCode = await run_command_inherit_async(command, args, {
+      cwd: loaded_config.repo_root,
+      env: create_runtime_env(
+        runtime_state.instance,
+        runtime_state.effective_env_values,
+        runtime_state.tailscale,
+        undefined,
+        runtime_state.active_tailscale_routing,
+      ),
+    });
     return;
   }
 
@@ -1159,7 +1216,7 @@ async function main() {
     const env_subcommand = argv[1];
 
     if (env_subcommand === "write") {
-      console.log(runtime_state.env_status_message);
+      sync_runtime_env(runtime_state);
       return;
     }
 
@@ -1179,8 +1236,6 @@ async function main() {
     return;
   }
 
-  console.log(runtime_state.env_status_message);
-
   if (command_name === "setup") {
     if (!runtime_state.instance.dependencies.owns) {
       throw new Error(
@@ -1189,6 +1244,7 @@ async function main() {
     }
 
     assert_dependency_stack_idle(runtime_state, "run setup or migrations for");
+    sync_runtime_env(runtime_state);
 
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);
@@ -1236,6 +1292,7 @@ async function main() {
     }
 
     assert_environment_session_available(runtime_state.instance);
+    sync_runtime_env(runtime_state);
     prepare_dev_dependencies(runtime_state);
     ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
     await ensure_routing_ready(loaded_config);

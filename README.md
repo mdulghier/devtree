@@ -174,6 +174,49 @@ In a non-interactive terminal Devtree never prompts. It uses the documented defa
 Session names are unique within a project. Devtree refuses to start a second live session with the same name instead of silently stealing its Portless or Caddy routes.
 One checkout may run only one live session at a time because its managed environment file is checkout-local.
 
+### Use the same session in other commands
+
+`dev`, `info`, `hosts`, `setup`, `deps`, `env`, and `exec` resolve the session
+from the current checkout. Explicit flags take precedence; otherwise commands
+follow its live session, including its dependency owner. With no live session,
+they use the checkout defaults described above. Session choices are not saved
+after the session exits. Automatic discovery requires the environment registry.
+
+Selecting a different `--name` uses that session's checkout defaults unless you
+also select dependencies. Selecting the current live name retains its dependency
+owner. `--deps OWNER` or `-d` overrides dependencies without changing the selected
+session name.
+
+For example, start `pnpm devtree dev --name billing -d` in one terminal. From
+another terminal in the same checkout:
+
+```bash
+pnpm devtree info                       # Shows billing and its isolated stack
+pnpm devtree deps logs                  # Inspects billing's dependencies
+pnpm devtree exec -- pnpm test          # Uses billing's URLs and environment
+pnpm devtree exec -- pnpm db:studio
+```
+
+`exec` runs the command from the project root, forwards its exit status, and
+neither starts dependencies nor writes an environment file. It supports the
+configured Varlock wrapper. The command must follow `--`.
+
+`info`, `hosts`, and `env show` do not write environment files. Use `env write`
+to explicitly sync one. A conflicting selection cannot rewrite the environment
+file while another session runs in the checkout.
+
+Session flags also work for dependency lifecycle commands after a session exits:
+
+```bash
+pnpm devtree setup --name billing -d
+pnpm devtree deps stop --name billing -d
+pnpm devtree env write --name billing -d
+```
+
+Ownership and live-consumer protections still apply. Interactive `dev -i` uses
+the resolved session as its initial selection; `setup -i` remains the routing
+configuration wizard.
+
 ### Configure the default session name
 
 The primary checkout defaults to `default`. A linked worktree prefers the branch name and falls back to the worktree name. Override that policy with a resolver:
