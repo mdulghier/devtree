@@ -8,5 +8,8 @@ Choose the smallest setup that meets your needs:
   development machine and other machines on a Tailscale network. It also shows
   owned and reusable PostgreSQL and Redis dependency stacks.
 
-Both examples link to the Devtree source in this repository and include complete
+- [mise](./mise/README.md) loads session values into your shell and runs Vite
+  through a mise task without generating an env file.
+
+All examples link to the Devtree source in this repository and include complete
 installation, startup, session, worktree, and cleanup instructions.

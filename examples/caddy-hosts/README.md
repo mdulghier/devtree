@@ -261,5 +261,5 @@ git worktree remove ../devtree-caddy-example
 - `.devtree.local.yml` stores the ignored machine namespace created by setup.
 - `devtree.config.ts` defines application environment values and dependencies.
 - `docker-compose.yml` defines the PostgreSQL and Redis services.
-- `vite.config.ts` adds the Devtree Vite plugin.
+- `vite.config.ts` uses ordinary Vite configuration; Devtree supplies the launch settings.
 - `src/main.ts` displays the values received by the application.

@@ -324,7 +324,9 @@ export function classify_projects(
 function get_live_consumer_projects(instance: Devtree_instance) {
   const live_dependency_owners = new Set(
     list_environment_sessions()
-      .filter((session) => session.project_name === instance.project_name)
+      .filter(
+        (session) => session.status !== "stopped" && session.project_name === instance.project_name,
+      )
       .map((session) => session.dependency_owner),
   );
   const compose_projects = list_registered_compose_projects(instance.project_name)

@@ -7,11 +7,7 @@ import {
   remove_tailscale_mapping_state,
   type Active_tailscale_routing,
 } from "./routing-state.ts";
-import {
-  command_exists,
-  run_command_capture,
-  type Command_result,
-} from "./process.ts";
+import { command_exists, run_command_capture, type Command_result } from "./process.ts";
 import type { Resolved_tailscale } from "./tailscale.ts";
 
 type Tailscale_tcp_handler = {
@@ -79,11 +75,7 @@ export function create_tailscale_target(local_port: number) {
   return `localhost:${local_port}`;
 }
 
-export function create_tailscale_url(
-  hostname: string,
-  https: boolean,
-  serve_port: number,
-) {
+export function create_tailscale_url(hostname: string, https: boolean, serve_port: number) {
   validate_port(serve_port, "Tailscale Serve port");
   return `${https ? "https" : "http"}://${hostname}:${serve_port}`;
 }
@@ -207,9 +199,7 @@ function run_serve_status(dependencies: Tailscale_serve_dependencies) {
   if (status_result.status !== 0) {
     const detail = status_result.stderr || status_result.stdout;
     const detail_suffix = detail ? ` ${detail}` : "";
-    throw new Error(
-      `Could not inspect Tailscale Serve configuration.${detail_suffix}`,
-    );
+    throw new Error(`Could not inspect Tailscale Serve configuration.${detail_suffix}`);
   }
 
   return status_result.stdout || "{}";
@@ -230,7 +220,7 @@ function require_connected_tailscale(tailscale: Resolved_tailscale) {
   }
 }
 
-function create_active_routing(options: {
+export function resolve_tailscale_application_routing(options: {
   instance: Devtree_instance;
   tailscale: Resolved_tailscale;
   serve_port: number;
@@ -287,8 +277,7 @@ export function inspect_tailscale_serve(options: {
   const node_id = options.tailscale.node_id as string;
   const mapping_key = get_tailscale_mapping_key(node_id, options.serve_port);
   const state_path = options.state_path ?? get_routing_state_path();
-  const persisted_mapping =
-    read_routing_state(state_path).tailscale_mappings[mapping_key] ?? null;
+  const persisted_mapping = read_routing_state(state_path).tailscale_mappings[mapping_key] ?? null;
 
   return {
     status,
@@ -343,7 +332,7 @@ export function ensure_tailscale_serve(options: {
     if (!tailscale_serve_mapping_matches(confirmed_status, inspection.target)) {
       throw new Error(
         `Tailscale did not retain the requested Serve mapping on port ${options.serve_port}. ` +
-        `Expected tcp://${inspection.target}, found ${describe_tailscale_serve_status(confirmed_status)}.`,
+          `Expected tcp://${inspection.target}, found ${describe_tailscale_serve_status(confirmed_status)}.`,
       );
     }
 
@@ -356,7 +345,7 @@ export function ensure_tailscale_serve(options: {
     );
   }
 
-  const active_routing = create_active_routing({
+  const active_routing = resolve_tailscale_application_routing({
     instance: options.instance,
     tailscale: options.tailscale,
     serve_port: options.serve_port,

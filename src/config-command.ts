@@ -78,7 +78,10 @@ function json_value_to_expression(value: unknown): ts.Expression {
 
   return ts.factory.createObjectLiteralExpression(
     Object.entries(value as Record<string, unknown>).map(([key, entry_value]) =>
-      ts.factory.createPropertyAssignment(create_property_name(key), json_value_to_expression(entry_value)),
+      ts.factory.createPropertyAssignment(
+        create_property_name(key),
+        json_value_to_expression(entry_value),
+      ),
     ),
     true,
   );
@@ -128,7 +131,10 @@ function print_node(node: ts.Node, source_file: ts.SourceFile) {
   return printer.printNode(ts.EmitHint.Unspecified, node, source_file);
 }
 
-function create_nested_object_literal(segments: string[], value: ts.Expression): ts.ObjectLiteralExpression {
+function create_nested_object_literal(
+  segments: string[],
+  value: ts.Expression,
+): ts.ObjectLiteralExpression {
   const [segment, ...rest] = segments;
 
   if (!segment) {
@@ -218,7 +224,11 @@ export function get_config_value(config: Devtree_config, config_path: string) {
   let current_value: unknown = config;
 
   for (const segment of get_config_path_segments(config_path)) {
-    if (current_value === null || typeof current_value !== "object" || !(segment in current_value)) {
+    if (
+      current_value === null ||
+      typeof current_value !== "object" ||
+      !(segment in current_value)
+    ) {
       return undefined;
     }
 
@@ -244,7 +254,35 @@ export function format_config_value(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+export function get_config_expression(source_text: string, config_path: string): ts.Expression {
+  const source_file = ts.createSourceFile(
+    "devtree.config.ts",
+    source_text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  let expression: ts.Expression = get_object_literal_from_source_file(source_file);
+  for (const segment of get_config_path_segments(config_path)) {
+    if (!ts.isObjectLiteralExpression(expression))
+      throw new Error(`Cannot inspect ${config_path}: an ancestor is not an object literal.`);
+    const property = get_property_assignment(expression, segment);
+    if (!property)
+      throw new Error(`Cannot inspect ${config_path}: ${segment} is not an explicit property.`);
+    expression = property.initializer;
+  }
+  return expression;
+}
+
 export function update_config_text(source_text: string, config_path: string, raw_value: string) {
+  return update_config_expression(source_text, config_path, parse_value_expression(raw_value));
+}
+
+export function update_config_expression(
+  source_text: string,
+  config_path: string,
+  value: ts.Expression,
+) {
   const source_file = ts.createSourceFile(
     "devtree.config.ts",
     source_text,
@@ -256,7 +294,7 @@ export function update_config_text(source_text: string, config_path: string, raw
   const replacement_plan = plan_config_update(
     root_object_literal,
     get_config_path_segments(config_path),
-    parse_value_expression(raw_value),
+    value,
   );
 
   return [

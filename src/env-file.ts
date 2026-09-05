@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
-import { parse } from "dotenv";
+import { parseEnv } from "node:util";
 
 import type { Loaded_devtree_config, Managed_env_entry } from "./config.ts";
 import type { Devtree_instance } from "./instance.ts";
@@ -108,7 +108,7 @@ function read_existing_env_file(
   return {
     file_text,
     custom_text: remove_managed_block(file_text, start_marker, end_marker, preamble_lines),
-    env_values: parse(file_text),
+    env_values: parseEnv(file_text) as Record<string, string>,
   };
 }
 
@@ -137,6 +137,23 @@ export function resolve_env_file(
   instance: Devtree_instance,
   write = false,
 ): Ensure_env_file_result {
+  if (loaded_config.config.env.provider === "process") {
+    const managed_entries = loaded_config.config.env.entries({
+      config: loaded_config.config,
+      instance,
+      dependencies: instance.dependencies,
+      existing_env_values: {},
+    });
+    const managed_env_values = get_managed_env_values(managed_entries);
+    return {
+      created: false,
+      updated: false,
+      env_file_path: instance.env_file_path,
+      managed_entries,
+      managed_env_values,
+      effective_env_values: managed_env_values,
+    };
+  }
   const markers = get_block_markers(loaded_config.config.env.managed_block_id);
   const existing_env = read_existing_env_file(
     instance.env_file_path,
@@ -169,7 +186,7 @@ export function resolve_env_file(
     env_file_path: instance.env_file_path,
     managed_entries,
     managed_env_values: get_managed_env_values(managed_entries),
-    effective_env_values: parse(next_file_text),
+    effective_env_values: parseEnv(next_file_text) as Record<string, string>,
   };
 }
 

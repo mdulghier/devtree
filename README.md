@@ -47,7 +47,9 @@ pnpm add -D devtree portless
 
 ### Configure the project
 
-Create `devtree.config.ts` at the repository root:
+For guided setup, run `pnpm devtree setup --interactive`. It works before a configuration exists, detects the project’s tools, previews changes, and offers to verify the application.
+
+To configure it manually, create `devtree.config.ts` at the repository root:
 
 ```ts
 import { define_devtree_config } from "devtree";
@@ -81,18 +83,7 @@ export default define_devtree_config({
 
 Use `runner: "vite-plus"` for VitePlus projects.
 
-Register the Vite plugin:
-
-```ts
-import { defineConfig } from "vite";
-import { devtree_vite_plugins } from "devtree/vite";
-
-import devtree_config from "./devtree.config.ts";
-
-export default defineConfig({
-  plugins: [...(await devtree_vite_plugins(devtree_config))],
-});
-```
+Vite needs no Devtree plugin or Devtree-specific configuration. Devtree supplies its launch flags and allowed public hostname.
 
 Add a package script:
 
@@ -172,20 +163,13 @@ pnpm devtree dev -- --open              # Pass arguments after -- to Vite
 In a non-interactive terminal Devtree never prompts. It uses the documented defaults or fails with an actionable message when the requested dependency stack does not exist.
 
 Session names are unique within a project. Devtree refuses to start a second live session with the same name instead of silently stealing its Portless or Caddy routes.
-One checkout may run only one live session at a time because its managed environment file is checkout-local.
+One checkout may run only one live session at a time, including with the process provider.
 
 ### Use the same session in other commands
 
-`dev`, `info`, `hosts`, `setup`, `deps`, `env`, and `exec` resolve the session
-from the current checkout. Explicit flags take precedence; otherwise commands
-follow its live session, including its dependency owner. With no live session,
-they use the checkout defaults described above. Session choices are not saved
-after the session exits. Automatic discovery requires the environment registry.
+`dev`, `info`, `hosts`, `setup`, `deps`, `env`, and `exec` share the checkout's selected session. Selecting `--name` saves that choice under `~/.devtree`; its dependency owner and assigned ports survive stopping and restarting. With no saved selection, Devtree uses the checkout defaults above.
 
-Selecting a different `--name` uses that session's checkout defaults unless you
-also select dependencies. Selecting the current live name retains its dependency
-owner. `--deps OWNER` or `-d` overrides dependencies without changing the selected
-session name.
+`--deps OWNER` or `-d` changes the dependency selection of a stopped session. A live session's name, checkout, endpoints, and dependency owner cannot change. Stop it first. One checkout may have several saved sessions and one live session.
 
 For example, start `pnpm devtree dev --name billing -d` in one terminal. From
 another terminal in the same checkout:
@@ -214,8 +198,7 @@ pnpm devtree env write --name billing -d
 ```
 
 Ownership and live-consumer protections still apply. Interactive `dev -i` uses
-the resolved session as its initial selection; `setup -i` remains the routing
-configuration wizard.
+the saved session as its initial selection; `setup -i` configures the project.
 
 ### Configure the default session name
 
@@ -361,7 +344,7 @@ using it.
 
 ## Inspect sessions
 
-List every live Devtree session from any directory:
+List every saved Devtree session, including stopped sessions, from any directory:
 
 ```bash
 pnpx devtree list
@@ -385,13 +368,19 @@ pnpm devtree info --name billing-redesign --deps default
 
 `info` prints every endpoint and the resolved dependency owner.
 
-Environment registration is enabled by default. Disable it in `.devtree.yml` when a project must not appear in the machine-wide list:
+Session persistence is required. The legacy `registry.enabled: false` option is ignored.
 
-```yaml
-version: 1
-registry:
-  enabled: false
+Remove a stopped session to release its assignments:
+
+```bash
+pnpm devtree session remove               # Selected session in this checkout
+pnpm devtree session remove --name old    # Another saved session in this checkout
+pnpm devtree session remove <session-id>  # From any directory, including after deleting a worktree
 ```
+
+Find session IDs in `devtree list --json`. Removal refuses a live session. A dead controller and runner leave a stopped session; a surviving runner continues to count as live until it exits.
+
+Assignments are exclusive within Devtree. If another application takes an assigned server port, startup fails with the conflicting address instead of picking a different port.
 
 ## Portless and Caddy
 
@@ -449,9 +438,22 @@ pnpm devtree tailscale status
 pnpm devtree tailscale remove
 ```
 
-## Environment files
+## Environment providers and exports
 
-Devtree writes managed values to `.env.local` by default. Existing content outside the managed block is preserved.
+`dotenv` remains the default and maintains `.env.local`. `varlock` keeps the env file and wraps commands with `varlock run`. Existing content outside the managed block is preserved. `process` passes managed values to servers, hooks, and dependency commands without reading or writing an env file; its `existing_env_values` is empty. Read any additional process values explicitly in your configuration.
+
+All providers support environment exports without writing checkout files or starting services:
+
+```bash
+pnpm devtree env                          # KEY=value lines for inspection
+pnpm devtree env --shell                  # POSIX-shell-quoted export statements
+pnpm devtree env --json                   # A JSON object
+pnpm devtree env --json --name billing -d # Select and save a stopped session
+```
+
+Exports include managed values and `DEVTREE_*` metadata. They exclude unrelated parent environment variables, unmanaged env-file entries, and Vite's private hostname setting. `env write` and `env show` remain available; `env write` does not write a file with the process provider.
+
+Env-file parsing uses Node 24's `parseEnv`, so no `dotenv` package is needed. Quotes, comments, multiline values, and escaped newlines are supported; escaped `\r` in double quotes remains literal under Node's parser.
 
 Every app process receives runtime variables including:
 
@@ -465,6 +467,69 @@ DEVTREE_PUBLIC_HOSTNAME=billing-redesign.acme-cloud.localhost
 ```
 
 Endpoint-specific values belong in the project's explicit `env.entries` callback because projects choose their own variable names.
+
+## mise
+
+Install the project's dependencies, then register the bundled environment adapter:
+
+```bash
+pnpm devtree mise install
+```
+
+The command copies the Lua adapter to `~/.devtree/mise/devtree` and registers that stable directory with mise. Rerunning it updates the adapter. An unrelated plugin already named `devtree` is reported as a conflict.
+
+Use `provider: "process"` and enable the adapter in `mise.toml`:
+
+```toml
+[env]
+_.path = ["./node_modules/.bin"]
+_.devtree = { tools = true }
+
+[tasks.dev]
+run = "devtree dev"
+
+[tasks."vite:serve"]
+run = "vite dev"
+```
+
+Optionally launch the server through that mise task:
+
+```ts
+dev_server: {
+  runner: { kind: "mise", task: "vite:serve" },
+},
+```
+
+Server tasks must accept Vite flags and must not call `devtree dev` recursively. Varlock wraps the entire mise invocation when selected. The adapter calls the current checkout's installed CLI directly, also from subdirectories. It never falls back to a global Devtree package. Output is uncached so selection changes appear on the next mise environment refresh.
+
+Enable mise shell activation and trust the project's configuration. See the [complete mise example](examples/mise/README.md) and [mise environment hook documentation](https://mise.jdx.dev/env-plugin-development.html).
+
+## Guided setup and recovery
+
+`devtree setup --interactive` supports package scripts, mise, local routing, and Caddy with Tailscale. It preserves existing environment callbacks, hooks, and unrelated scripts, and offers Compose or command dependencies. It previews files, installations, and routing changes before applying them; choose **Go back** to revise choices.
+
+Cancelling before apply writes nothing. After apply, completed work is reported and can be resumed by rerunning the guide. Existing values are detected again. TypeScript configuration that cannot be safely edited receives explicit manual settings instead of a rewrite. Tailscale login and wildcard DNS can be finished later.
+
+The finish message distinguishes configuration saved, prerequisites checked, and a responding application. Starting dependencies, running configured setup/migration hooks, and starting the server are separate choices. Plain `devtree setup` remains noninteractive and runs the configured dependency setup hooks. `devtree dev -i` remains the session picker.
+
+## Migration: removing the Vite plugin
+
+Remove imports from `devtree/vite` (or `@mdulghier/devtree/vite`) and calls to `devtree_vite_plugins`. The package no longer exports that entry point. Devtree prints the session, public URL, and instance ID before launching Vite. Vite may also print its loopback URL.
+
+For Varlock, add its standard integration directly to `vite.config.ts`:
+
+```ts
+import { defineConfig } from "vite";
+import { varlockVitePlugin } from "@varlock/vite-integration";
+
+export default defineConfig({
+  plugins: [varlockVitePlugin({ ssrInjectMode: "init-only" })],
+});
+```
+
+Devtree still uses `varlock run`. Vite's [additional allowed-host environment setting](https://vite.dev/config/server-options.html#server-allowedhosts) is supplied only to the server. Running Vite directly bypasses Devtree and no longer prints the old plugin warning.
+
+Existing version 2 session records migrate automatically to version 3. Live endpoint assignments are retained; expired records become stopped sessions. Session removal is now explicit.
 
 ## Cleanup
 

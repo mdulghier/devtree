@@ -5,7 +5,9 @@ import type { Environment_session } from "./environment-registry.ts";
 
 function create_session(runner_pid: number | null): Environment_session {
   return {
-    version: 2,
+    version: 3,
+    status: runner_pid === null ? "starting" : "running",
+    ports: {},
     session_id: "session-123",
     instance_id: "instance-123",
     project_name: "acme-cloud",
@@ -48,7 +50,7 @@ describe("environment list formatting", () => {
   });
 
   test("prints a clear empty state", () => {
-    expect(format_environment_list([])).toBe("No running Devtree environments.");
+    expect(format_environment_list([])).toBe("No saved Devtree sessions.");
     expect(format_environment_list_json([])).toBe("[]");
   });
 });

@@ -1,0 +1,18 @@
+{
+  "name": "devtree-example-mise",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "devtree": "devtree",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "devtree": "link:../..",
+    "portless": "^0.15.5",
+    "vite": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.32.1"
+}

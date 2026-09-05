@@ -16,7 +16,6 @@ import {
 } from "./caddy.ts";
 import { ensure_caddy_process } from "./caddy-process.ts";
 import { find_devtree_config, load_devtree_config } from "./config.ts";
-import { format_config_value, get_config_value, set_config_value } from "./config-command.ts";
 import {
   build_development_command,
   get_dev_server_command,
@@ -26,13 +25,13 @@ import { get_proxy_mode_configuration_error, is_proxy_tailscale_mode } from "./d
 import { ensure_env_file, resolve_env_file, get_env_file_status_message } from "./env-file.ts";
 import { format_environment_list, format_environment_list_json } from "./environment-list.ts";
 import {
-  assert_environment_session_available,
   create_environment_session,
   list_dependency_stack_sessions,
   list_environment_sessions,
+  get_selected_environment_session,
   remove_environment_session,
+  stop_environment_session,
   set_environment_session_runner_pid,
-  type Environment_session,
 } from "./environment-registry.ts";
 import { run_gc } from "./gc.ts";
 import {
@@ -43,7 +42,6 @@ import {
 } from "./hosts.ts";
 import { create_devtree_instance, type Devtree_instance } from "./instance.ts";
 import { format_routing_info_lines } from "./info.ts";
-import { run_interactive_setup } from "./interactive-setup.ts";
 import { resolve_portless_https, resolve_portless_port } from "./hostname.ts";
 import { get_portless_alias_add_args, get_portless_alias_remove_args } from "./portless.ts";
 import {
@@ -63,6 +61,8 @@ import {
   type Active_tailscale_routing,
 } from "./routing-state.ts";
 import { resolve_routing } from "./routing.ts";
+import { assert_dev_server_port_available } from "./server-port.ts";
+import { format_env_export } from "./env-export.ts";
 import { create_runtime_env } from "./runtime-env.ts";
 import { parse_session_options, resolve_session_instance } from "./session-options.ts";
 import { resolve_tailscale, type Resolved_tailscale } from "./tailscale.ts";
@@ -73,8 +73,8 @@ import {
   inspect_tailscale_serve,
   remove_owned_tailscale_serve,
   resolve_tailscale_serve_port,
+  resolve_tailscale_application_routing,
 } from "./tailscale-serve.ts";
-import { run_upgrade_command } from "./upgrade.ts";
 
 type Command_name =
   | "config"
@@ -88,6 +88,8 @@ type Command_name =
   | "hosts"
   | "info"
   | "list"
+  | "mise"
+  | "session"
   | "setup"
   | "tailscale"
   | "upgrade";
@@ -108,7 +110,7 @@ function print_help() {
   console.log("  doctor [--fix]          Check local prerequisites, routing, and Tailscale");
   console.log("  config <key> [value]    Read or write a config value in devtree.config.ts");
   console.log("  info [session options]  Print resolved URLs and resource names");
-  console.log("  list [--json]           List running Devtree environments on this machine");
+  console.log("  list [--json]           List saved Devtree sessions on this machine");
   console.log("  tailscale status|remove Inspect or safely remove Devtree's Serve mapping");
   console.log("  hosts [session options] Print endpoint hosts-file entries");
   console.log(
@@ -120,6 +122,11 @@ function print_help() {
   console.log("  exec [session options] -- <command>  Run with the session environment");
   console.log("  Session options: --name NAME, --deps OWNER, -d (own dependencies)");
   console.log("  gc [--dry-run] [-v]     Remove orphaned dependency resources");
+  console.log("  mise install             Install or update the bundled mise env adapter");
+  console.log(
+    "  session remove [--name NAME|SESSION_ID]  Remove a stopped session and release its ports",
+  );
+  console.log("  env [--json|--shell] [session options]  Export the session environment");
   console.log("  env write|show [session options]  Sync env or inspect the selected session");
 }
 
@@ -169,7 +176,7 @@ function run_process(
   const [command, ...args] = wrapped_command;
 
   return run_command_inherit(command, args, {
-    cwd: options?.cwd,
+    cwd: options?.cwd ?? runtime_state.loaded_config.repo_root,
     allow_failure: options?.allow_failure,
     env: create_runtime_env(
       runtime_state.instance,
@@ -188,12 +195,20 @@ function get_runtime_state(
   const env_result = resolve_env_file(loaded_config, instance);
   const tailscale = resolve_tailscale(loaded_config.config);
   const persisted_tailscale_routing = get_persisted_active_tailscale_routing(instance);
+  const routing = resolve_routing(loaded_config.config);
   const active_tailscale_routing =
+    is_proxy_tailscale_mode(tailscale.mode) &&
+    tailscale.connected &&
     tailscale.node_id &&
-    persisted_tailscale_routing &&
-    !persisted_tailscale_routing.mapping_key.startsWith(`${tailscale.node_id}:`)
-      ? null
-      : persisted_tailscale_routing;
+    tailscale.ipv4
+      ? resolve_tailscale_application_routing({
+          instance,
+          tailscale,
+          serve_port: get_tailscale_serve_port(loaded_config),
+          mapping_owned: persisted_tailscale_routing?.mapping_owned ?? false,
+          target: `localhost:${routing.port}`,
+        })
+      : null;
 
   return {
     loaded_config,
@@ -209,6 +224,7 @@ function sync_runtime_env(runtime_state: Runtime_state) {
   const instance = runtime_state.instance;
   const conflicting_session = list_environment_sessions().find(
     (session) =>
+      session.status !== "stopped" &&
       session.worktree_path === instance.worktree_path &&
       (session.project_name !== instance.project_name ||
         session.session_name !== instance.session_name ||
@@ -222,7 +238,9 @@ function sync_runtime_env(runtime_state: Runtime_state) {
   const env_result = ensure_env_file(runtime_state.loaded_config, instance);
   runtime_state.managed_env_values = env_result.managed_env_values;
   runtime_state.effective_env_values = env_result.effective_env_values;
-  console.log(get_env_file_status_message(env_result));
+  if (runtime_state.loaded_config.config.env.provider !== "process") {
+    console.log(get_env_file_status_message(env_result));
+  }
 }
 
 function print_tailscale_status(runtime_state: Runtime_state) {
@@ -521,13 +539,16 @@ function resolve_require_from_root(repo_root: string) {
 }
 
 function get_dev_server_runner(loaded_config: Loaded_devtree_config): Dev_server_runner {
-  const runner = loaded_config.config.dev_server?.runner as string | undefined;
+  const runner = loaded_config.config.dev_server?.runner;
 
   if (runner === undefined || runner === "vite-plus" || runner === "vite") {
     return runner ?? "vite-plus";
   }
 
-  throw new Error('dev_server.runner must be "vite-plus" or "vite".');
+  if (typeof runner === "object" && runner.kind === "mise" && runner.task?.trim()) return runner;
+  throw new Error(
+    'dev_server.runner must be "vite-plus", "vite", or { kind: "mise", task: "task-name" }.',
+  );
 }
 
 function ensure_proxy_mode_configuration(
@@ -576,6 +597,19 @@ async function run_doctor(loaded_config: Loaded_devtree_config, fix = false) {
 
   if (command_exists(dev_server_command)) {
     console.log(`[pass] dev server runner ${dev_server_command} available`);
+    if (typeof dev_server_runner === "object") {
+      const task = run_command_capture(
+        "mise",
+        ["tasks", "info", dev_server_runner.task, "--json"],
+        { cwd: loaded_config.repo_root, allow_failure: true },
+      );
+      if (task.status !== 0)
+        issues.push(
+          `mise server task ${dev_server_runner.task} is unavailable: ${task.stderr || task.stdout}`,
+        );
+      else if (/\bdevtree\s+dev\b/u.test(String(JSON.parse(task.stdout).run)))
+        issues.push("The mise server task must launch Vite, not devtree dev.");
+    }
   } else {
     issues.push(`dev server runner ${dev_server_command} is not available on PATH`);
   }
@@ -992,6 +1026,14 @@ async function main() {
     return;
   }
 
+  if (command_name === "env") {
+    const output_flags = argv.filter((arg) => arg === "--json" || arg === "--shell");
+    if (output_flags.includes("--json") && output_flags.includes("--shell"))
+      throw new Error("Choose either --json or --shell.");
+    if (["write", "show"].includes(argv[1]) && output_flags.length)
+      throw new Error("Output flags are supported by devtree env without a write/show subcommand.");
+  }
+
   if (command_name === "list") {
     const list_args = argv.slice(1);
 
@@ -1014,25 +1056,35 @@ async function main() {
     }
 
     const { config_path, repo_root } = find_devtree_config();
+    const { run_upgrade_command } = await import("./upgrade.ts");
     await run_upgrade_command(repo_root, config_path);
     return;
   }
 
-  let loaded_config = await load_devtree_config();
+  if (command_name === "mise") {
+    if (argv.length !== 2 || argv[1] !== "install") throw new Error("Usage: devtree mise install");
+    const { install_mise_adapter } = await import("./mise.ts");
+    install_mise_adapter();
+    return;
+  }
 
   if (command_name === "setup" && (argv.includes("--interactive") || argv.includes("-i"))) {
-    const setup_result = await run_interactive_setup(loaded_config);
-
-    if (!setup_result.configured) {
-      return;
-    }
-
-    if (!setup_result.continue_setup) {
-      return;
-    }
-
-    loaded_config = await load_devtree_config();
+    const { run_interactive_setup } = await import("./interactive-setup.ts");
+    await run_interactive_setup(
+      process.cwd(),
+      argv.slice(1).filter((arg) => arg !== "-i" && arg !== "--interactive"),
+    );
+    return;
   }
+
+  if (command_name === "session" && argv[1] === "remove" && argv[2] && !argv[2].startsWith("-")) {
+    if (argv.length !== 3) throw new Error("Usage: devtree session remove <session-id>");
+    remove_environment_session(argv[2]);
+    console.log(`Removed session ${argv[2]}.`);
+    return;
+  }
+
+  const loaded_config = await load_devtree_config();
 
   if (command_name === "doctor") {
     await run_doctor(loaded_config, argv.includes("--fix"));
@@ -1040,6 +1092,8 @@ async function main() {
   }
 
   if (command_name === "config") {
+    const { format_config_value, get_config_value, set_config_value } =
+      await import("./config-command.ts");
     const config_key = argv[1];
 
     if (!config_key) {
@@ -1093,11 +1147,43 @@ async function main() {
     return;
   }
 
+  if (command_name === "session") {
+    if (argv[1] !== "remove") throw new Error("Usage: devtree session remove [--name NAME]");
+    const options = parse_session_options(argv.slice(2));
+    if (
+      options.interactive ||
+      options.dependency_owner ||
+      options.own_dependencies ||
+      options.passthrough_args.length
+    )
+      throw new Error("Usage: devtree session remove [--name NAME]");
+    const instance = create_devtree_instance(loaded_config, options);
+    const session = options.session_name
+      ? list_environment_sessions().find(
+          (entry) =>
+            entry.instance_id === instance.instance_id &&
+            entry.worktree_path === instance.worktree_path,
+        )
+      : (get_selected_environment_session(instance.project_name, instance.worktree_path) ??
+        list_environment_sessions().find(
+          (entry) =>
+            entry.instance_id === instance.instance_id &&
+            entry.worktree_path === instance.worktree_path,
+        ));
+    if (!session) throw new Error("No saved session matches this checkout and name.");
+    remove_environment_session(session.session_id);
+    console.log(`Removed session ${session.project_name}/${session.session_name}.`);
+    return;
+  }
+
   let resolved_instance: Devtree_instance | null = null;
   let dev_passthrough_args: string[] = [];
 
   if (["dev", "info", "setup", "deps", "env", "exec"].includes(command_name)) {
-    const option_args = argv.slice(command_name === "deps" || command_name === "env" ? 2 : 1);
+    const env_subcommand = command_name === "env" && ["write", "show"].includes(argv[1]);
+    const option_args = argv
+      .slice(command_name === "deps" || env_subcommand ? 2 : 1)
+      .filter((arg) => command_name !== "env" || (arg !== "--json" && arg !== "--shell"));
     const parsed_options = parse_session_options(
       command_name === "setup"
         ? option_args.filter((arg) => arg !== "-i" && arg !== "--interactive")
@@ -1225,7 +1311,28 @@ async function main() {
       return;
     }
 
-    throw new Error("Usage: devtree env <write|show>");
+    if (argv.includes("--json") && argv.includes("--shell"))
+      throw new Error("Choose either --json or --shell.");
+    const managed_values = Object.fromEntries(
+      Object.keys(runtime_state.managed_env_values).map((key) => [
+        key,
+        runtime_state.effective_env_values[key],
+      ]),
+    );
+    const values = create_runtime_env(
+      runtime_state.instance,
+      managed_values,
+      runtime_state.tailscale,
+      undefined,
+      runtime_state.active_tailscale_routing,
+    );
+    console.log(
+      format_env_export(
+        values,
+        argv.includes("--json") ? "json" : argv.includes("--shell") ? "shell" : "plain",
+      ),
+    );
+    return;
   }
 
   if (command_name === "gc") {
@@ -1291,15 +1398,6 @@ async function main() {
       );
     }
 
-    assert_environment_session_available(runtime_state.instance);
-    sync_runtime_env(runtime_state);
-    prepare_dev_dependencies(runtime_state);
-    ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
-    await ensure_routing_ready(loaded_config);
-    await ensure_tailscale_proxy_ready(runtime_state);
-    print_tailscale_status(runtime_state);
-    run_hook(runtime_state, "pre_dev");
-
     const dev_server_endpoint = Object.values(runtime_state.instance.endpoints).find(
       (endpoint) => endpoint.target_kind === "dev-server",
     );
@@ -1319,15 +1417,23 @@ async function main() {
     const [command, ...args] = development_command;
 
     let exit_status = 0;
-    let environment_session: Environment_session | null = null;
     let cleanup_routes: () => Promise<void> = async () => {};
 
-    if (loaded_config.config.registry?.enabled !== false) {
-      environment_session = create_environment_session(runtime_state.instance);
-    }
+    const environment_session = create_environment_session(runtime_state.instance);
 
     try {
+      await assert_dev_server_port_available(dev_server_endpoint);
+      sync_runtime_env(runtime_state);
+      prepare_dev_dependencies(runtime_state);
+      ensure_proxy_mode_configuration(loaded_config, runtime_state.instance);
+      await ensure_routing_ready(loaded_config);
+      await ensure_tailscale_proxy_ready(runtime_state);
+      print_tailscale_status(runtime_state);
+      run_hook(runtime_state, "pre_dev");
+
       cleanup_routes = await register_endpoint_routes(runtime_state);
+      console.log(`[devtree] Session ${runtime_state.instance.session_name}`);
+      console.log(`[devtree] Instance ${runtime_state.instance.instance_id}`);
       print_application_urls(runtime_state);
 
       const runtime_env = create_runtime_env(
@@ -1344,12 +1450,12 @@ async function main() {
       );
 
       exit_status = await run_command_inherit_async(command, args, {
-        env: runtime_env,
+        cwd: loaded_config.repo_root,
+        env: {
+          ...runtime_env,
+          __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: dev_server_endpoint.public_hostname,
+        },
         on_spawn: (runner_pid) => {
-          if (!environment_session) {
-            return;
-          }
-
           try {
             set_environment_session_runner_pid(environment_session, runner_pid);
           } catch (error) {
@@ -1363,14 +1469,12 @@ async function main() {
       try {
         await cleanup_routes();
       } finally {
-        if (environment_session) {
-          try {
-            remove_environment_session(environment_session.session_id);
-          } catch (error) {
-            console.warn(
-              `[devtree] Could not remove this environment's registry entry: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
+        try {
+          stop_environment_session(environment_session.session_id);
+        } catch (error) {
+          console.warn(
+            `[devtree] Could not mark the session stopped: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     }

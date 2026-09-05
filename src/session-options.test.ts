@@ -1,4 +1,7 @@
-import { describe, expect, test } from "vite-plus/test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { afterEach, describe, expect, test } from "vite-plus/test";
 
 import type { Loaded_devtree_config } from "./config.ts";
 import {
@@ -6,6 +9,16 @@ import {
   resolve_session_instance,
   type Prompt_dependencies,
 } from "./session-options.ts";
+
+const state_roots: string[] = [];
+function state_root() {
+  const root = mkdtempSync(resolve(tmpdir(), "devtree-session-options-"));
+  state_roots.push(root);
+  return root;
+}
+afterEach(() => {
+  for (const root of state_roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function create_loaded_config(): Loaded_devtree_config {
   return {
@@ -72,6 +85,7 @@ describe("session options", () => {
       create_loaded_config(),
       parse_session_options(["-i"]),
       prompts,
+      state_root(),
     );
 
     expect(instance).toMatchObject({
@@ -102,6 +116,7 @@ describe("session options", () => {
       create_loaded_config(),
       parse_session_options(["-i", "--name", "feature-one", "-d"]),
       prompts,
+      state_root(),
     );
 
     expect(question_count).toBe(0);
@@ -119,6 +134,7 @@ describe("session options", () => {
         cancel: (message) => cancellations.push(message),
         is_cancel: (value) => typeof value === "symbol",
       }),
+      state_root(),
     );
 
     expect(result).toBeNull();

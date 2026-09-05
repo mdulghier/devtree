@@ -67,6 +67,12 @@ pnpm devtree dev -- --open
 session own an isolated stack. A second live session cannot use the same project
 and session name because that would steal its endpoint routes.
 
+Sessions remain saved after shutdown. `devtree env --json` creates or reuses the checkout's selection without starting services; `--shell` emits quoted shell exports. Named selections and dependency owners persist under `~/.devtree`. Stop a live session before changing its identity or dependency selection.
+
+Remove a stopped selection with `devtree session remove`, or pass `--name NAME`. Use `devtree session remove <session-id>` after deleting a checkout; IDs appear in `list --json`. Startup reuses assigned ports and reports occupied ports instead of silently changing them.
+
+With `env.provider: "process"`, all commands pass managed values without generating an env file. Install the optional mise adapter with `devtree mise install`; it loads each checkout's selected environment on the next mise activation.
+
 ## Inspect runtime state
 
 Inspect the current checkout's resolved project, session, dependency owner, and
@@ -77,7 +83,7 @@ pnpm devtree info
 pnpm devtree info --name feature-x --deps default
 ```
 
-List every live Devtree session from any directory:
+List every saved Devtree session, including stopped sessions, from any directory:
 
 ```bash
 pnpx devtree list

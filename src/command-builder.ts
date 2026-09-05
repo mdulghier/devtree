@@ -4,9 +4,10 @@ export function strip_passthrough_delimiter(args: string[]) {
   return args[0] === "--" ? args.slice(1) : args;
 }
 
-export type Dev_server_runner = "vite-plus" | "vite";
+export type Dev_server_runner = "vite-plus" | "vite" | { kind: "mise"; task: string };
 
 export function get_dev_server_command(runner: Dev_server_runner) {
+  if (typeof runner === "object") return "mise";
   return runner === "vite" ? "vite" : "vp";
 }
 
@@ -17,8 +18,9 @@ export function build_vite_dev_command(
   port?: number,
 ) {
   return [
-    get_dev_server_command(runner),
-    "dev",
+    ...(typeof runner === "object"
+      ? ["mise", "run", runner.task, "--"]
+      : [get_dev_server_command(runner), "dev"]),
     "--host",
     host,
     "--clearScreen",
@@ -41,6 +43,11 @@ export function build_development_command(options: {
   use_varlock: boolean;
 }) {
   const routing_provider = options.routing_provider ?? "portless";
+  const reserved_option = options.extra_args.find((argument) =>
+    /^--(?:host|port|strictPort|clearScreen)(?:=|$)/u.test(argument),
+  );
+  if (reserved_option)
+    throw new Error(`${reserved_option} is managed by Devtree and cannot be overridden.`);
 
   if (routing_provider === "caddy" && options.vite_port === undefined) {
     throw new Error("A fixed Vite port is required when Caddy routing is enabled.");

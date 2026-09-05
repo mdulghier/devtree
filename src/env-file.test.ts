@@ -167,4 +167,41 @@ describe("ensure_env_file", () => {
 
     rmSync(repo_root, { force: true, recursive: true });
   });
+  test("Node parses quotes, comments, escapes and multiline values for both file providers", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-parser-"));
+    try {
+      const loaded_config = create_loaded_config(repo_root);
+      const instance = create_devtree_instance(loaded_config);
+      const source = `PLAIN=value # comment\nSINGLE='space # literal'\nDOUBLE="first\\nsecond\\rthird"\nMULTILINE="one\ntwo"\n`;
+      for (const provider of ["dotenv", "varlock"] as const) {
+        loaded_config.config.env.provider = provider;
+        writeFileSync(instance.env_file_path, source);
+        const result = ensure_env_file(loaded_config, instance);
+        expect(result.effective_env_values).toMatchObject({
+          PLAIN: "value",
+          SINGLE: "space # literal",
+          DOUBLE: "first\nsecond\\rthird",
+          MULTILINE: "one\ntwo",
+        });
+      }
+    } finally {
+      rmSync(repo_root, { recursive: true, force: true });
+    }
+  });
+
+  test("process mode neither reads nor rewrites an existing env file", () => {
+    const repo_root = mkdtempSync(resolve(tmpdir(), "devtree-process-env-"));
+    try {
+      const loaded_config = create_loaded_config(repo_root);
+      loaded_config.config.env.provider = "process";
+      const instance = create_devtree_instance(loaded_config);
+      writeFileSync(instance.env_file_path, "CUSTOM=keep-private\n");
+      const result = ensure_env_file(loaded_config, instance);
+      expect(result.effective_env_values.CUSTOM).toBeUndefined();
+      expect(readFileSync(instance.env_file_path, "utf8")).toBe("CUSTOM=keep-private\n");
+      expect(result.updated).toBe(false);
+    } finally {
+      rmSync(repo_root, { recursive: true, force: true });
+    }
+  });
 });

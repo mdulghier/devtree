@@ -11,12 +11,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
-      '@varlock/vite-integration':
-        specifier: '*'
-        version: 0.2.6(varlock@0.6.1)(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.12.0)(tsx@4.21.0)(yaml@2.8.3))
-      dotenv:
-        specifier: ^17.3.1
-        version: 17.3.1
+      smol-toml:
+        specifier: ^1.8.0
+        version: 1.8.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -628,13 +625,6 @@ packages:
   '@types/node@24.12.0':
     resolution: {integrity: sha512-GYDxsZi3ChgmckRT9HPU0WEhKLP08ev/Yfcq2AstjrDASOYCSXeyjDsHg4v5t4jOj7cyDX3vmprafKlWIG9MXQ==}
 
-  '@varlock/vite-integration@0.2.6':
-    resolution: {integrity: sha512-IvAjojtCh/h3RjPdom313wmwAtDVFvpL511RWj/HXIhyTELp1s0wnocktjBHQUJtb/fmA+UYP/qBGmZQwlwRYg==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      varlock: ^0.6.0
-      vite: '>=5'
-
   '@voidzero-dev/vite-plus-core@0.1.16':
     resolution: {integrity: sha512-fOyf14CXjcXqANFs2fCXEX+0Tn9ZjmqfFV+qTnARwIF1Kzl8WquO4XtvlDgs/fTQ91H4AyoNUgkvWdKS+C4xYA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -783,10 +773,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  dotenv@17.3.1:
-    resolution: {integrity: sha512-IO8C/dzEb6O3F9/twg6ZLXz164a2fhTnEWb95H23Dm4OuN+92NmEAlTrupP9VW6Jm3sO26tQlqyvyi4CsnY9GA==}
-    engines: {node: '>=12'}
 
   es-module-lexer@1.7.0:
     resolution: {integrity: sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA==}
@@ -964,6 +950,10 @@ packages:
 
   sisteransi@1.0.5:
     resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
+  smol-toml@1.8.0:
+    resolution: {integrity: sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==}
+    engines: {node: '>= 18'}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -1407,11 +1397,6 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
-  '@varlock/vite-integration@0.2.6(varlock@0.6.1)(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.12.0)(tsx@4.21.0)(yaml@2.8.3))':
-    dependencies:
-      varlock: 0.6.1
-      vite: 8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.12.0)(tsx@4.21.0)(yaml@2.8.3)
-
   '@voidzero-dev/vite-plus-core@0.1.16(@types/node@24.12.0)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)':
     dependencies:
       '@oxc-project/runtime': 0.123.0
@@ -1493,8 +1478,6 @@ snapshots:
   cac@6.7.14: {}
 
   detect-libc@2.1.2: {}
-
-  dotenv@17.3.1: {}
 
   es-module-lexer@1.7.0: {}
 
@@ -1714,6 +1697,8 @@ snapshots:
       totalist: 3.0.1
 
   sisteransi@1.0.5: {}
+
+  smol-toml@1.8.0: {}
 
   source-map-js@1.2.1: {}
 

@@ -1,0 +1,12 @@
+[tools]
+node = "24"
+
+[env]
+_.path = ["./node_modules/.bin"]
+_.devtree = { tools = true }
+
+[tasks.dev]
+run = "devtree dev"
+
+[tasks."vite:serve"]
+run = "vite dev"

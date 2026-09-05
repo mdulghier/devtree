@@ -14,7 +14,7 @@ import { resolve } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 import type { Loaded_devtree_config } from "./config.ts";
-import { create_environment_session, remove_environment_session } from "./environment-registry.ts";
+import { create_environment_session, stop_environment_session } from "./environment-registry.ts";
 import { create_devtree_instance } from "./instance.ts";
 
 const cli_path = resolve(import.meta.dirname, "cli.ts");
@@ -53,7 +53,7 @@ function fixture() {
       return create_environment_session(instance, state_root);
     },
     deactivate(session_id: string) {
-      remove_environment_session(session_id, state_root);
+      stop_environment_session(session_id, state_root);
     },
     run(args: string[]) {
       return spawnSync(process.execPath, ["--import", tsx_loader_path, cli_path, ...args], {
@@ -68,7 +68,7 @@ function fixture() {
   };
 }
 
-describe("session context across CLI commands", () => {
+describe("session context across CLI commands", { timeout: 15_000 }, () => {
   test("inspection follows the live isolated session without creating or rewriting env files", () => {
     const project = fixture();
     try {
@@ -81,9 +81,8 @@ describe("session context across CLI commands", () => {
 
       writeFileSync(project.env_path, "CUSTOM=preserve-me\n");
       const alternate = project.run(["info", "--name", "other", "--deps", "shared"]);
-      expect(alternate.status).toBe(0);
-      expect(alternate.stdout).toContain("Session: other");
-      expect(alternate.stdout).toContain("Dependencies: shared");
+      expect(alternate.status).toBe(1);
+      expect(alternate.stderr).toContain("Stop it before changing the selection");
       expect(readFileSync(project.env_path, "utf8")).toBe("CUSTOM=preserve-me\n");
       const show = project.run(["env", "show"]);
       expect(show.stdout).toContain("Session: billing");
@@ -92,7 +91,7 @@ describe("session context across CLI commands", () => {
     }
   });
 
-  test("exec inherits the live dependency selection, supports overrides, and forwards exit status", () => {
+  test("exec inherits the live dependency selection, rejects changes while live, and forwards exit status", () => {
     const project = fixture();
     try {
       project.activate("billing", "reporting");
@@ -106,8 +105,8 @@ describe("session context across CLI commands", () => {
         database: "postgres://reporting",
       });
       expect(JSON.parse(execute(["--name", "billing"]).stdout).owner).toBe("reporting");
-      expect(JSON.parse(execute(["-d"]).stdout).owner).toBe("billing");
-      expect(JSON.parse(execute(["--name", "other", "-d"]).stdout).session).toBe("other");
+      expect(execute(["-d"]).status).toBe(1);
+      expect(execute(["--name", "other", "-d"]).status).toBe(1);
       expect(existsSync(project.env_path)).toBe(false);
       expect(project.run(["exec", "--", process.execPath, "-e", "process.exit(7)"]).status).toBe(7);
     } finally {
@@ -115,7 +114,7 @@ describe("session context across CLI commands", () => {
     }
   });
 
-  test("dependency commands and setup accept session options and use checkout defaults after exit", () => {
+  test("dependency commands and setup accept session options and retain the selected session after exit", () => {
     const project = fixture();
     try {
       const session = project.activate("billing");
@@ -123,14 +122,13 @@ describe("session context across CLI commands", () => {
       expect(logs.status).toBe(0);
       expect(JSON.parse(logs.stdout).owner).toBe("billing");
       const start = project.run(["deps", "start", "--name", "other", "-d"]);
-      expect(start.status).toBe(0);
-      expect(JSON.parse(start.stdout).owner).toBe("other");
+      expect(start.status).toBe(1);
       project.deactivate(session.session_id);
       const setup = project.run(["setup", "--name", "other", "-d"]);
       expect(setup.status).toBe(0);
       expect(setup.stdout).toContain('"owner":"other"');
       expect(readFileSync(project.env_path, "utf8")).toContain("DATABASE_URL=postgres://other");
-      expect(project.run(["info"]).stdout).toContain("Session: default");
+      expect(project.run(["info"]).stdout).toContain("Session: other");
     } finally {
       project.cleanup();
     }
@@ -146,7 +144,7 @@ describe("session context across CLI commands", () => {
       expect(readFileSync(project.env_path, "utf8")).toBe(original_env);
       const write = project.run(["env", "write", "--deps", "other"]);
       expect(write.status).toBe(1);
-      expect(write.stderr).toContain("Cannot rewrite the environment");
+      expect(write.stderr).toContain("Stop it before changing the selection");
       expect(readFileSync(project.env_path, "utf8")).toBe(original_env);
       expect(project.run(["env", "write"]).status).toBe(0);
       expect(readFileSync(project.env_path, "utf8")).toContain("DATABASE_URL=postgres://billing");

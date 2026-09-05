@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -114,6 +114,7 @@ export type Devtree_config = {
   };
   endpoints?: Record<string, Endpoint_config>;
   registry?: {
+    /** @deprecated Sessions are always persisted; this option is ignored. */
     enabled?: boolean;
   };
   routing?: {
@@ -135,10 +136,10 @@ export type Devtree_config = {
     bootstrap?: "best-effort" | "manual";
   };
   dev_server?: {
-    runner?: "vite-plus" | "vite";
+    runner?: import("./command-builder.ts").Dev_server_runner;
   };
   env: {
-    provider: "dotenv" | "varlock";
+    provider: "dotenv" | "varlock" | "process";
     file_path?: string;
     schema_path?: string;
     managed_block_id?: string;
@@ -193,7 +194,7 @@ export async function load_devtree_config(
   start_dir = process.cwd(),
 ): Promise<Loaded_devtree_config> {
   const { config_path, repo_root } = find_devtree_config(start_dir);
-  const config_url = pathToFileURL(config_path).href;
+  const config_url = `${pathToFileURL(config_path).href}?mtime=${statSync(config_path).mtimeMs}`;
   const imported_config = (await import(config_url)) as { default?: Devtree_config };
 
   if (!imported_config.default) {

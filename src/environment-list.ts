@@ -13,7 +13,7 @@ type Environment_list_row = {
 };
 
 function get_environment_status(session: Environment_session) {
-  return session.runner_pid === null ? "starting" : "running";
+  return session.status;
 }
 
 function get_pid_list(session: Environment_session) {
@@ -48,7 +48,7 @@ function pad(value: string, width: number) {
 
 export function format_environment_list(sessions: Environment_session[]) {
   if (sessions.length === 0) {
-    return "No running Devtree environments.";
+    return "No saved Devtree sessions.";
   }
 
   const rows = sessions.map(to_row);

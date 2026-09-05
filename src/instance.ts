@@ -32,6 +32,7 @@ export type Resolved_endpoint = {
 };
 
 export type Devtree_instance = {
+  session_id?: string;
   project_name: string;
   session_name: string;
   dependency_owner: string;
@@ -61,6 +62,13 @@ export type Create_devtree_instance_options = {
   session_name?: string;
   dependency_owner?: string;
   own_dependencies?: boolean;
+  reserve_port?: (
+    scope: string,
+    name: string,
+    base_port: number,
+    span: number,
+    initial_port: number,
+  ) => number;
 };
 
 function get_hash_suffix(value: string) {
@@ -180,6 +188,7 @@ function create_dependency_scope(
   project_name: string,
   session_name: string,
   owner_name: string,
+  reserve_port?: Create_devtree_instance_options["reserve_port"],
 ): Dependency_scope {
   const scope_id = get_hash_suffix(`${project_name}:dependencies:${owner_name}`);
   const scoped_name = `${project_name}-${owner_name}`;
@@ -192,12 +201,9 @@ function create_dependency_scope(
       return suffix ? `${scoped_name}-${slugify(suffix)}` : scoped_name;
     },
     allocate_port(name: string, base_port: number, span = 1000) {
-      return allocate_identity_port(
-        `${project_name}:dependencies:${owner_name}`,
-        name,
-        base_port,
-        span,
-      );
+      const scope = `${project_name}:dependencies:${owner_name}`;
+      const initial_port = allocate_identity_port(scope, name, base_port, span);
+      return reserve_port?.(scope, slugify(name), base_port, span, initial_port) ?? initial_port;
     },
   };
 }
@@ -308,7 +314,12 @@ export function create_devtree_instance(
     `${project_name}:dependencies`,
     "dependency owner",
   );
-  const dependencies = create_dependency_scope(project_name, session_name, dependency_owner);
+  const dependencies = create_dependency_scope(
+    project_name,
+    session_name,
+    dependency_owner,
+    options.reserve_port,
+  );
   const instance_id = get_hash_suffix(`${project_name}:session:${session_name}`);
   const scoped_name = `${project_name}-${session_name}`;
   const routing = resolve_routing(loaded_config.config);
@@ -352,11 +363,10 @@ export function create_devtree_instance(
       return suffix ? `${scoped_name}-${slugify(suffix)}` : scoped_name;
     },
     allocate_port(name: string, base_port: number, span = 1000) {
-      return allocate_identity_port(
-        `${project_name}:session:${session_name}`,
-        name,
-        base_port,
-        span,
+      const scope = `${project_name}:session:${session_name}`;
+      const initial_port = allocate_identity_port(scope, name, base_port, span);
+      return (
+        options.reserve_port?.(scope, slugify(name), base_port, span, initial_port) ?? initial_port
       );
     },
   };

@@ -119,5 +119,5 @@ git worktree remove ../devtree-portless-example
 ## Files worth reading
 
 - `devtree.config.ts` connects the checkout URL to `.env.local`.
-- `vite.config.ts` adds the Devtree Vite plugin.
+- `vite.config.ts` uses ordinary Vite configuration; Devtree supplies the launch settings.
 - `src/main.ts` displays the values received by the application.

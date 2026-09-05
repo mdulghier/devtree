@@ -72,18 +72,11 @@ Exactly one endpoint must be primary and exactly one must target the managed
 development server. Other endpoints route to loopback ports; another task runner
 or a `pre_dev` hook is responsible for starting those services.
 
-Register the Vite plugin:
+No Devtree Vite plugin is needed. Remove any `devtree/vite` import and `devtree_vite_plugins` call. Devtree sets the launch flags and one allowed public hostname.
 
-```ts
-import { defineConfig } from "vite-plus";
-import { devtree_vite_plugins } from "devtree/vite";
+For Varlock, configure `varlockVitePlugin({ ssrInjectMode: "init-only" })` from `@varlock/vite-integration` directly in the application's Vite configuration. Devtree still wraps commands with `varlock run`.
 
-import devtree_config from "./devtree.config.ts";
-
-export default defineConfig({
-  plugins: [...(await devtree_vite_plugins(devtree_config))],
-});
-```
+For a guided setup, use `devtree setup --interactive`. To avoid generated env files, choose `env.provider: "process"`; `devtree env --json` exports the selected persistent session. Optional mise integration is installed with `devtree mise install`.
 
 Add scripts:
 

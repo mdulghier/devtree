@@ -15,6 +15,7 @@ export function create_runtime_env(
     DEVTREE_ACTIVE: "1",
     DEVTREE_PROJECT_NAME: instance.project_name,
     DEVTREE_SESSION_NAME: instance.session_name,
+    DEVTREE_SESSION_ID: instance.session_id,
     DEVTREE_DEPENDENCY_OWNER: instance.dependency_owner,
     DEVTREE_INSTANCE_ID: instance.instance_id,
     DEVTREE_PUBLIC_HOSTNAME: instance.public_hostname,
